@@ -93,6 +93,21 @@ main { padding: 24px; max-width: 1000px; margin: 0 auto; }
 }
 .link-btn:hover { background: #e8efff; }
 
+.diary-date { margin-bottom: 8px; font-size: 14px; font-weight: bold; }
+.diary-text {
+  width: 100%;
+  min-height: 180px;
+  padding: 10px;
+  border: 1px solid #ccd1db;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.7;
+  resize: vertical;
+}
+.diary-actions { display: flex; align-items: center; gap: 12px; }
+.diary-status { font-size: 12px; color: #2e7d32; }
+
 @media (max-width: 700px) {
   .layout.two-col { grid-template-columns: 1fr; }
   .tabs { overflow-x: auto; padding: 8px 8px 0; }

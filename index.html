@@ -30,7 +30,12 @@
         </div>
         <div class="box">
           <div class="box-label">日記（今日あったこと）</div>
-          <div class="box-desc">ここに記述欄<br>選択中の日付 表示 / テキストエディタ / 保存ボタン</div>
+          <div class="diary-date" id="diary-date"></div>
+          <textarea id="diary-text" class="diary-text" placeholder="今日あったことを書きましょう"></textarea>
+          <div class="diary-actions">
+            <button id="diary-save" class="link-btn">保存</button>
+            <span id="diary-status" class="diary-status"></span>
+          </div>
         </div>
       </div>
     </section>
