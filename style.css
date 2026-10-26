@@ -1,0 +1,100 @@
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  background: #f4f5f7;
+  color: #333;
+}
+
+.app-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 14px 24px;
+  background: #fff;
+  border-bottom: 1px solid #ddd;
+}
+.app-header h1 { margin: 0; font-size: 20px; }
+.header-note { font-size: 12px; color: #888; }
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 24px 0;
+  background: #fff;
+  border-bottom: 1px solid #ddd;
+}
+.tab {
+  padding: 10px 18px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  font-size: 14px;
+  cursor: pointer;
+  color: #666;
+}
+.tab:hover { background: #f0f2f5; }
+.tab.active {
+  background: #f4f5f7;
+  border-color: #ddd;
+  color: #1a56db;
+  font-weight: bold;
+  margin-bottom: -1px;
+}
+
+main { padding: 24px; max-width: 1000px; margin: 0 auto; }
+
+.view { display: none; }
+.view.active { display: block; }
+
+.view-title { font-size: 18px; font-weight: bold; margin-bottom: 16px; }
+.view-title small { font-size: 12px; font-weight: normal; color: #888; }
+
+.layout { display: grid; gap: 16px; }
+.layout.two-col { grid-template-columns: 1fr 1fr; }
+
+.box {
+  min-height: 280px;
+  padding: 16px;
+  background: #fff;
+  border: 2px dashed #b8bfcc;
+  border-radius: 10px;
+}
+.box-label {
+  display: inline-block;
+  padding: 2px 10px;
+  margin-bottom: 12px;
+  background: #e8efff;
+  color: #1a56db;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: bold;
+}
+.box-desc { font-size: 14px; line-height: 1.8; color: #666; }
+
+.clock {
+  margin-top: 20px;
+  font-size: 40px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: #333;
+}
+
+.link-btn {
+  margin-top: 16px;
+  padding: 8px 14px;
+  border: 1px solid #1a56db;
+  border-radius: 6px;
+  background: #fff;
+  color: #1a56db;
+  cursor: pointer;
+}
+.link-btn:hover { background: #e8efff; }
+
+@media (max-width: 700px) {
+  .layout.two-col { grid-template-columns: 1fr; }
+  .tabs { overflow-x: auto; padding: 8px 8px 0; }
+  main { padding: 16px; }
+}
