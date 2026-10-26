@@ -51,8 +51,14 @@
         </div>
         <div class="box">
           <div class="box-label">カレンダー（月表示）</div>
-          <div class="box-desc">ここにカレンダー<br>日付をクリック →「ToDo・日記」タブへ遷移し、その日の日記を表示</div>
-          <button class="link-btn" data-goto="view-journal">日付を選択 → ToDo・日記へ</button>
+          <div class="cal-nav">
+            <button id="cal-prev" class="link-btn" aria-label="前の月">‹</button>
+            <span id="cal-title" class="cal-title"></span>
+            <button id="cal-next" class="link-btn" aria-label="次の月">›</button>
+            <button id="cal-today" class="link-btn">今日</button>
+          </div>
+          <div id="cal-grid" class="cal-grid"></div>
+          <div class="box-desc">日付をクリックすると「ToDo・日記」タブでその日の日記を開きます（● は記録あり）</div>
         </div>
       </div>
     </section>
