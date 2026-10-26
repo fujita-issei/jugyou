@@ -17,6 +17,15 @@ body {
 }
 .app-header h1 { margin: 0; font-size: 20px; }
 .header-note { font-size: 12px; color: #888; }
+.date-badge {
+  margin-left: auto;
+  padding: 4px 10px;
+  background: #e8efff;
+  color: #1a56db;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: bold;
+}
 
 .tabs {
   display: flex;
@@ -44,13 +53,28 @@ body {
   margin-bottom: -1px;
 }
 
-main { padding: 24px; max-width: 1000px; margin: 0 auto; }
+main { padding: 24px; max-width: 1100px; margin: 0 auto; }
 
 .view { display: none; }
 .view.active { display: block; }
 
-.view-title { font-size: 18px; font-weight: bold; margin-bottom: 16px; }
-.view-title small { font-size: 12px; font-weight: normal; color: #888; }
+.view-title {
+  font-size: 18px;
+  font-weight: bold;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.date-nav {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: normal;
+  font-size: 14px;
+}
+.date-nav #date-label { min-width: 180px; text-align: center; font-weight: bold; }
 
 .layout { display: grid; gap: 16px; }
 .layout.two-col { grid-template-columns: 1fr 1fr; }
@@ -59,7 +83,7 @@ main { padding: 24px; max-width: 1000px; margin: 0 auto; }
   min-height: 280px;
   padding: 16px;
   background: #fff;
-  border: 2px dashed #b8bfcc;
+  border: 1px solid #d8dce5;
   border-radius: 10px;
 }
 .box-label {
@@ -72,31 +96,42 @@ main { padding: 24px; max-width: 1000px; margin: 0 auto; }
   font-size: 13px;
   font-weight: bold;
 }
+.box-label.alt { background: #f0f4ea; color: #43603b; }
 .box-desc { font-size: 14px; line-height: 1.8; color: #666; }
+
+.hint { font-size: 12px; color: #888; margin-top: 6px; line-height: 1.6; }
 
 .clock {
   margin-top: 20px;
-  font-size: 40px;
+  font-size: 48px;
   font-variant-numeric: tabular-nums;
   text-align: center;
   color: #333;
 }
+.clock-date { text-align: center; color: #666; margin-top: 4px; }
 
 .link-btn {
-  margin-top: 16px;
+  margin-top: 0;
   padding: 8px 14px;
   border: 1px solid #1a56db;
   border-radius: 6px;
   background: #fff;
   color: #1a56db;
   cursor: pointer;
+  font: inherit;
 }
 .link-btn:hover { background: #e8efff; }
+.link-btn.sm { padding: 4px 10px; font-size: 13px; }
+.link-btn.danger { border-color: #c62828; color: #c62828; }
+.link-btn.danger:hover { background: #fdecea; }
+.link-btn.primary { background: #1a56db; color: #fff; }
+.link-btn.primary:hover { background: #164bbb; }
+.link-btn[disabled] { opacity: 0.5; cursor: not-allowed; }
 
 .diary-date { margin-bottom: 8px; font-size: 14px; font-weight: bold; }
 .diary-text {
   width: 100%;
-  min-height: 180px;
+  min-height: 160px;
   padding: 10px;
   border: 1px solid #ccd1db;
   border-radius: 6px;
@@ -105,17 +140,129 @@ main { padding: 24px; max-width: 1000px; margin: 0 auto; }
   line-height: 1.7;
   resize: vertical;
 }
-.diary-actions { display: flex; align-items: center; gap: 12px; }
+.diary-actions { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
 .diary-status { font-size: 12px; color: #2e7d32; }
+.diary-status.err { color: #c62828; }
 
-@media (max-width: 700px) {
-  .layout.two-col { grid-template-columns: 1fr; }
-  .tabs { overflow-x: auto; padding: 8px 8px 0; }
-  main { padding: 16px; }
+/* ToDo */
+.todo-form { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+.todo-form input[type=text] {
+  flex: 1 1 180px;
+  padding: 8px;
+  border: 1px solid #ccd1db;
+  border-radius: 6px;
+  font: inherit;
+}
+.todo-form input[type=number] {
+  width: 90px;
+  padding: 8px;
+  border: 1px solid #ccd1db;
+  border-radius: 6px;
+  font: inherit;
+}
+.todo-list { list-style: none; padding: 0; margin: 0; }
+.todo-item {
+  border: 1px solid #e3e6ec;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 8px;
+  background: #fafbfc;
+}
+.todo-item.done { background: #f4f6f1; opacity: 0.8; }
+.todo-item.running { border-color: #1a56db; box-shadow: 0 0 0 2px #e8efff; }
+.todo-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.todo-text { flex: 1; min-width: 160px; font-weight: 500; }
+.todo-item.done .todo-text { text-decoration: line-through; color: #888; }
+.todo-plan { font-size: 12px; color: #666; }
+.todo-elapsed {
+  font-variant-numeric: tabular-nums;
+  font-weight: bold;
+  color: #1a56db;
+  min-width: 70px;
+  text-align: right;
+}
+.todo-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+.todo-actions button {
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid #c7cdd8;
+  background: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.todo-actions button:hover { background: #eef1f6; }
+.todo-actions button.start { color: #1a56db; border-color: #1a56db; }
+.todo-actions button.stop { color: #c62828; border-color: #c62828; }
+.todo-actions button.finish { color: #2e7d32; border-color: #2e7d32; }
+.todo-actions button.del { color: #888; }
+
+.todo-diff { font-size: 12px; margin-top: 4px; }
+.todo-diff.pos { color: #c62828; }   /* 超過 */
+.todo-diff.neg { color: #2e7d32; }   /* 早く終わった */
+.todo-note {
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px;
+  border: 1px solid #ccd1db;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  min-height: 44px;
+  resize: vertical;
 }
 
+/* Log */
+.log-section { margin-top: 20px; padding-top: 12px; border-top: 1px dashed #ccd1db; }
+.todo-log { list-style: none; padding: 0; margin: 0; }
+.todo-log li {
+  padding: 8px 0;
+  border-bottom: 1px solid #eef0f4;
+  font-size: 13px;
+}
+.todo-log li:last-child { border-bottom: none; }
+.log-title { font-weight: bold; }
+.log-meta { color: #666; font-size: 12px; }
+.log-note { color: #333; margin-top: 2px; white-space: pre-wrap; }
+
+/* Timer tab */
+.active-timer { display: flex; flex-direction: column; gap: 10px; }
+.active-timer .big-time {
+  font-size: 56px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: #1a56db;
+}
+.active-timer .big-text { text-align: center; font-weight: bold; margin-top: -8px; }
+.active-timer .big-plan { text-align: center; color: #666; font-size: 13px; }
+.notify-row { margin-top: 16px; display: flex; gap: 10px; align-items: center; }
+
+/* LLM */
+.field { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 13px; }
+.field span { width: 90px; color: #555; }
+.field input {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid #ccd1db;
+  border-radius: 6px;
+  font: inherit;
+}
+.llm-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.llm-output {
+  background: #0f1420;
+  color: #e6edf3;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  min-height: 180px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: auto;
+}
+
+/* Calendar */
 .cal-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-.cal-nav .link-btn { margin-top: 0; padding: 4px 12px; }
+.cal-nav .link-btn { padding: 4px 12px; }
 .cal-title { flex: 1; text-align: center; font-weight: bold; }
 .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
 .cal-week { text-align: center; font-size: 12px; color: #888; padding: 4px 0; }
@@ -129,15 +276,36 @@ main { padding: 24px; max-width: 1000px; margin: 0 auto; }
   background: #fff;
   font-size: 14px;
   cursor: pointer;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 4px 6px;
 }
 .cal-day:hover { background: #e8efff; }
 .cal-day.today { border-color: #1a56db; font-weight: bold; color: #1a56db; }
-.cal-day.has-diary::after {
-  content: '●';
+.cal-day.selected { outline: 2px solid #1a56db; outline-offset: -2px; }
+.cal-day .marks {
   position: absolute;
-  bottom: 2px;
-  left: 0;
-  right: 0;
-  font-size: 8px;
-  color: #2e7d32;
+  left: 4px;
+  bottom: 3px;
+  display: flex;
+  gap: 2px;
+}
+.cal-day .marks i {
+  width: 6px; height: 6px; border-radius: 50%; display: inline-block;
+}
+.legend { display: flex; gap: 12px; margin-top: 10px; font-size: 12px; color: #666; }
+.legend .dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle;
+}
+.dot.green { background: #2e7d32; }
+.dot.blue  { background: #1a56db; }
+.dot.gray  { background: #999; }
+
+@media (max-width: 760px) {
+  .layout.two-col { grid-template-columns: 1fr; }
+  .tabs { overflow-x: auto; padding: 8px 8px 0; }
+  main { padding: 16px; }
+  .view-title { flex-wrap: wrap; }
+  .date-nav { margin-left: 0; }
 }

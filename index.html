@@ -3,13 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>パーソナルログ UIイメージ</title>
+  <title>パーソナルログ</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="app-header">
     <h1>パーソナルログ</h1>
-    <span class="header-note">UIイメージ（ワイヤーフレーム）</span>
+    <span class="header-note">ToDo・日記・タイマー・ローカルLLM要約</span>
+    <span id="selected-date-badge" class="date-badge" title="現在選択中の日付"></span>
   </header>
 
   <nav class="tabs" role="tablist">
@@ -20,14 +21,32 @@
   </nav>
 
   <main>
-    <!-- 1. ToDoと記述欄（デフォルト表示） -->
+    <!-- 1. ToDoと日記 -->
     <section id="view-journal" class="view active">
-      <div class="view-title">ToDo・日記画面 <small>（起動時のデフォルト表示）</small></div>
+      <div class="view-title">
+        ToDo・日記画面
+        <span class="date-nav">
+          <button id="date-prev" class="link-btn sm" aria-label="前の日">‹</button>
+          <span id="date-label"></span>
+          <button id="date-next" class="link-btn sm" aria-label="次の日">›</button>
+          <button id="date-today" class="link-btn sm">今日</button>
+        </span>
+      </div>
+
       <div class="layout two-col">
+        <!-- ToDo -->
         <div class="box">
           <div class="box-label">ToDo List</div>
-          <div class="box-desc">ここにToDo<br>追加入力欄 / タスク一覧 / 完了チェック / 編集・削除ボタン</div>
+          <form id="todo-form" class="todo-form">
+            <input type="text" id="todo-text" placeholder="やること（例: レポート執筆）" required>
+            <input type="number" id="todo-plan" placeholder="予定(分)" min="1" step="1">
+            <button type="submit" class="link-btn sm">追加</button>
+          </form>
+          <ul id="todo-list" class="todo-list"></ul>
+          <div id="todo-empty" class="hint">この日のToDoはまだありません。</div>
         </div>
+
+        <!-- 日記 -->
         <div class="box">
           <div class="box-label">日記（今日あったこと）</div>
           <div class="diary-date" id="diary-date"></div>
@@ -35,6 +54,12 @@
           <div class="diary-actions">
             <button id="diary-save" class="link-btn">保存</button>
             <span id="diary-status" class="diary-status"></span>
+          </div>
+
+          <div class="log-section">
+            <div class="box-label alt">ToDo完了ログ</div>
+            <ul id="todo-log" class="todo-log"></ul>
+            <div id="todo-log-empty" class="hint">この日の完了ログはまだありません。</div>
           </div>
         </div>
       </div>
@@ -46,8 +71,8 @@
       <div class="layout two-col">
         <div class="box">
           <div class="box-label">現在時刻</div>
-          <div class="box-desc">ここに現在時刻（リアルタイム）</div>
           <div class="clock" id="clock">--:--:--</div>
+          <div id="clock-date" class="clock-date"></div>
         </div>
         <div class="box">
           <div class="box-label">カレンダー（月表示）</div>
@@ -58,7 +83,11 @@
             <button id="cal-today" class="link-btn">今日</button>
           </div>
           <div id="cal-grid" class="cal-grid"></div>
-          <div class="box-desc">日付をクリックすると「ToDo・日記」タブでその日の日記を開きます（● は記録あり）</div>
+          <div class="legend">
+            <span><i class="dot green"></i>日記あり</span>
+            <span><i class="dot blue"></i>ToDoあり</span>
+            <span><i class="dot gray"></i>完了ログあり</span>
+          </div>
         </div>
       </div>
     </section>
@@ -68,8 +97,15 @@
       <div class="view-title">タイマー画面</div>
       <div class="layout">
         <div class="box">
-          <div class="box-label">タイマー</div>
-          <div class="box-desc">ここにタイマー<br>モード切替（カウントダウン / ストップウォッチ） / 時間表示 / スタート・停止・リセット</div>
+          <div class="box-label">進行中のタスク</div>
+          <div id="active-timer" class="active-timer">
+            <div class="hint">ToDoタブのタスクで「▶ 開始」を押すとタイマーが動きます。</div>
+          </div>
+
+          <div class="notify-row">
+            <button id="notify-enable" class="link-btn sm">🔔 通知を有効化</button>
+            <span id="notify-status" class="diary-status"></span>
+          </div>
         </div>
       </div>
     </section>
@@ -80,11 +116,43 @@
       <div class="layout two-col">
         <div class="box">
           <div class="box-label">要約条件</div>
-          <div class="box-desc">ここに期間指定（例: 直近1ヶ月） / 要約実行ボタン</div>
+          <label class="field">
+            <span>開始日</span>
+            <input type="date" id="llm-from">
+          </label>
+          <label class="field">
+            <span>終了日</span>
+            <input type="date" id="llm-to">
+          </label>
+          <label class="field">
+            <span>Ollama URL</span>
+            <input type="text" id="llm-url" value="http://localhost:11434" placeholder="http://localhost:11434">
+          </label>
+          <label class="field">
+            <span>モデル</span>
+            <input type="text" id="llm-model" value="llama3.2" placeholder="llama3.2 / qwen2.5 など">
+          </label>
+          <div class="llm-actions">
+            <button id="llm-run" class="link-btn">要約を実行</button>
+            <button id="llm-range-week" class="link-btn sm">直近1週間</button>
+            <button id="llm-range-month" class="link-btn sm">直近1ヶ月</button>
+          </div>
+          <div class="hint">
+            APIキー消費を避けるため、
+            <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a>
+            をローカルで起動し、モデル(例: <code>ollama pull llama3.2</code>)を取得してください。
+          </div>
         </div>
         <div class="box">
           <div class="box-label">要約結果</div>
-          <div class="box-desc">ここにローカルLLM（Llama等）による要約結果を表示<br>保存ボタン</div>
+          <div id="llm-status" class="diary-status"></div>
+          <pre id="llm-output" class="llm-output">ここに要約結果が表示されます。</pre>
+          <button id="llm-save" class="link-btn sm" disabled>この要約を保存</button>
+          <div class="log-section">
+            <div class="box-label alt">保存済み要約</div>
+            <ul id="llm-saved" class="todo-log"></ul>
+            <div id="llm-saved-empty" class="hint">保存済みの要約はありません。</div>
+          </div>
         </div>
       </div>
     </section>
