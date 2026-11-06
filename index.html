@@ -3,30 +3,45 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>パーソナルログ UIイメージ</title>
+  <title>パーソナルログ</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="app-header">
     <h1>パーソナルログ</h1>
-    <span class="header-note">UIイメージ（ワイヤーフレーム）</span>
+    <span class="header-note">ToDo・日記・タイマー・ローカルLLM要約</span>
+    <span id="selected-date-badge" class="date-badge" title="現在選択中の日付"></span>
   </header>
 
   <nav class="tabs" role="tablist">
     <button class="tab active" role="tab" data-target="view-journal">📝 ToDo・日記</button>
     <button class="tab" role="tab" data-target="view-calendar">📅 カレンダー・時刻</button>
     <button class="tab" role="tab" data-target="view-timer">⏱ タイマー</button>
-    <button class="tab" role="tab" data-target="view-llm">🤖 LLM要約</button>
+    <button class="tab" role="tab" data-target="view-llm">🗓 ふりかえり</button>
   </nav>
 
   <main>
     <!-- 1. ToDoと記述欄（デフォルト表示） -->
     <section id="view-journal" class="view active">
-      <div class="view-title">ToDo・日記画面 <small>（起動時のデフォルト表示）</small></div>
+      <div class="view-title">
+        ToDo・日記画面 <small>（起動時のデフォルト表示）</small>
+        <span class="date-nav">
+          <button id="date-prev" class="link-btn sm" aria-label="前の日">‹</button>
+          <span id="date-label"></span>
+          <button id="date-next" class="link-btn sm" aria-label="次の日">›</button>
+          <button id="date-today" class="link-btn sm">今日</button>
+        </span>
+      </div>
       <div class="layout two-col">
         <div class="box">
           <div class="box-label">ToDo List</div>
-          <div class="box-desc">ここにToDo<br>追加入力欄 / タスク一覧 / 完了チェック / 編集・削除ボタン</div>
+          <form id="todo-form" class="todo-form">
+            <input type="text" id="todo-text" placeholder="やること（例: レポート執筆）" required>
+            <input type="number" id="todo-plan" placeholder="予定(分)" min="1" step="1">
+            <button type="submit" class="link-btn sm">追加</button>
+          </form>
+          <ul id="todo-list" class="todo-list"></ul>
+          <div id="todo-empty" class="hint">この日のToDoはまだありません。</div>
         </div>
         <div class="box">
           <div class="box-label">日記（今日あったこと）</div>
@@ -35,6 +50,12 @@
           <div class="diary-actions">
             <button id="diary-save" class="link-btn">保存</button>
             <span id="diary-status" class="diary-status"></span>
+          </div>
+
+          <div class="log-section">
+            <div class="box-label alt">ToDo完了ログ</div>
+            <ul id="todo-log" class="todo-log"></ul>
+            <div id="todo-log-empty" class="hint">この日の完了ログはまだありません。</div>
           </div>
         </div>
       </div>
@@ -68,23 +89,63 @@
       <div class="view-title">タイマー画面</div>
       <div class="layout">
         <div class="box">
-          <div class="box-label">タイマー</div>
-          <div class="box-desc">ここにタイマー<br>モード切替（カウントダウン / ストップウォッチ） / 時間表示 / スタート・停止・リセット</div>
+          <div class="box-label">進行中のタスク</div>
+          <div id="active-timer" class="active-timer">
+            <div class="box-desc">ToDoタブのタスクで「▶ 開始」を押すとタイマーが動きます。<br>
+              予定(分)を設定したタスクは、超過時にブラウザ通知＆警告音でお知らせします。</div>
+          </div>
+          <div class="notify-row">
+            <button id="notify-enable" class="link-btn sm">🔔 通知を有効化</button>
+            <span id="notify-status" class="diary-status"></span>
+          </div>
         </div>
       </div>
     </section>
 
-    <!-- 4. ローカルLLM要約 -->
+    <!-- 4. 期間ふりかえり (ブラウザ内蔵AI → WebLLM 自動フォールバック) -->
     <section id="view-llm" class="view">
-      <div class="view-title">LLM要約画面</div>
+      <div class="view-title">期間ふりかえり画面</div>
       <div class="layout two-col">
         <div class="box">
-          <div class="box-label">要約条件</div>
-          <div class="box-desc">ここに期間指定（例: 直近1ヶ月） / 要約実行ボタン</div>
+          <div class="box-label">期間</div>
+          <div class="llm-actions">
+            <button id="llm-range-week"  class="link-btn sm">▸ 今週</button>
+            <button id="llm-range-month" class="link-btn sm">▸ 今月</button>
+            <button id="llm-range-3m"    class="link-btn sm">▸ 直近3ヶ月</button>
+          </div>
+          <label class="field">
+            <span>開始日</span>
+            <input type="date" id="llm-from">
+          </label>
+          <label class="field">
+            <span>終了日</span>
+            <input type="date" id="llm-to">
+          </label>
+
+          <div class="llm-actions">
+            <button id="llm-run" class="link-btn primary">✦ この期間をふりかえる</button>
+          </div>
+
+          <div class="box-desc">
+            <strong>ブラウザ内蔵AI</strong>で生成します（日記・ToDoは外部に送信されません）。<br>
+            未対応ブラウザでは、初回のみ小さなAIモデル（約1GB）を自動取得し、以後はオフラインでも動作します。
+          </div>
+          <div id="llm-backend" class="hint"></div>
         </div>
         <div class="box">
-          <div class="box-label">要約結果</div>
-          <div class="box-desc">ここにローカルLLM（Llama等）による要約結果を表示<br>保存ボタン</div>
+          <div class="box-label">ふりかえり結果</div>
+          <div id="llm-status" class="diary-status"></div>
+          <div id="llm-progress" class="llm-progress" hidden>
+            <div class="bar"><div id="llm-progress-fill" class="fill"></div></div>
+            <div id="llm-progress-text" class="hint"></div>
+          </div>
+          <pre id="llm-output" class="llm-output">ここにふりかえりの結果が表示されます。</pre>
+          <button id="llm-save" class="link-btn sm" disabled>この結果を保存</button>
+          <div class="log-section">
+            <div class="box-label alt">保存済みふりかえり</div>
+            <ul id="llm-saved" class="todo-log"></ul>
+            <div id="llm-saved-empty" class="hint">保存済みのふりかえりはありません。</div>
+          </div>
         </div>
       </div>
     </section>
