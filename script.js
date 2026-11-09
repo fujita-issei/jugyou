@@ -694,12 +694,24 @@ async function tryBuiltinAI({ system, user }, onToken) {
       throw new Error('Chrome 組み込みAI(LanguageModel)は現在の環境では unavailable です。chrome://on-device-internals で状態を確認してください。');
     }
 
-    // availability が 'downloadable' / 'downloading' の場合は、create() で
-    // モデル(Gemini Nano, 約2GB)のダウンロードが走り完了まで戻らない。
-    // 初回のみ長時間かかるため、進捗バーに流しつつ、最大10分でタイムアウト
-    // (時間内に終わらなければ次のバックエンドに回す)。
+    // availability が 'downloadable' / 'downloading' の場合、create() は
+    // Gemini Nano(数GB)のDLを開始し完了まで戻らない。環境によっては DL が
+    // 実質進まず延々待たされるため、既定ではここで即スキップして
+    // 次のバックエンド(WebLLM)に回す。
+    // 強制的に組み込みAI を使いたい場合は URL に ?force-builtin を付けると
+    // DL を開始する(タイムアウト 10 分)。
     llmStatus.textContent = `組み込みAI availability=${avail}`;
     const needsDownload = (avail === 'downloadable' || avail === 'downloading');
+    const forceBuiltin = new URLSearchParams(location.search).has('force-builtin');
+
+    if (needsDownload && !forceBuiltin) {
+      throw new Error(
+        `組み込みAI は モデル(Gemini Nano)を未ダウンロードです(availability=${avail})。` +
+        '次のバックエンド(WebLLM)に切り替えます。' +
+        '組み込みAIで試したい場合は URL に ?force-builtin を付けて開き直してください。'
+      );
+    }
+
     if (needsDownload) {
       llmProgress.hidden = false;
       llmProgressFill.style.width = '0%';
@@ -707,10 +719,8 @@ async function tryBuiltinAI({ system, user }, onToken) {
     }
 
     const createOpts = { ...CREATE_OPTS };
-    // monitor で downloadprogress を購読
     createOpts.monitor = (m) => {
       m.addEventListener('downloadprogress', (ev) => {
-        // ev.loaded: 0..1 (環境により 0..total バイト)
         const ratio = typeof ev.loaded === 'number' && ev.loaded <= 1
           ? ev.loaded
           : (ev.total ? ev.loaded / ev.total : 0);
@@ -721,7 +731,7 @@ async function tryBuiltinAI({ system, user }, onToken) {
       });
     };
 
-    // タイムアウト付き create: 10分でキャンセル
+    // タイムアウト付き create: DL中は10分、通常は60秒
     const createPromise = window.LanguageModel.create(createOpts);
     const timeoutMs = needsDownload ? 10 * 60 * 1000 : 60 * 1000;
     session = await Promise.race([
