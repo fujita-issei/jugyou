@@ -126,9 +126,14 @@
             <button id="llm-run" class="link-btn primary">✦ この期間をふりかえる</button>
           </div>
 
+          <label class="toggle-row">
+            <input type="checkbox" id="llm-use-external">
+            <span><strong>高品質モード</strong>（外部LLM／<a href="https://puter.com" target="_blank" rel="noopener">Puter.com</a> 無料サインイン、GPT/Claude/Gemini を使用）</span>
+          </label>
           <div class="box-desc">
-            <strong>ブラウザ内蔵AI</strong>で生成します（日記・ToDoは外部に送信されません）。<br>
-            未対応ブラウザでは、初回のみ小さなAIモデル（約1GB）を自動取得し、以後はオフラインでも動作します。
+            既定は <strong>ブラウザ内蔵AI</strong>（日記・ToDoは外部に送信されません）。<br>
+            未対応ブラウザでは初回のみ小さなAIモデル（約1GB）を取得し、以後オフラインでも動作します。<br>
+            高品質モードON時は <strong>日記本文がPuter経由で外部LLMに送信</strong>されます。
           </div>
           <div id="llm-backend" class="hint"></div>
         </div>

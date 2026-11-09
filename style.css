@@ -310,6 +310,22 @@ main { padding: 24px; max-width: 1000px; margin: 0 auto; }
   margin: 0 0 8px;
 }
 
+/* 外部LLM切替トグル */
+.toggle-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px;
+  margin: 8px 0;
+  background: #f7f9fc;
+  border: 1px solid #e3e6ec;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.toggle-row input { margin-top: 3px; }
+.toggle-row a { color: #1a56db; }
+
 /* 進捗バー (WebLLM 初回ダウンロード等) */
 .llm-progress { margin: 8px 0; }
 .llm-progress .bar {

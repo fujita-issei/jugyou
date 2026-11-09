@@ -605,32 +605,70 @@ function collectRange(from, to) {
   return rows;
 }
 
-function buildPrompt(rows, from, to) {
-  const header =
-    `以下は ${from} から ${to} までの個人の日々の記録です。` +
-    `各日の「日記(今日あったこと)」と「完了したToDoタスク(所要時間・予定差分・コメント)」を踏まえ、` +
-    `この期間に何があったかを日本語で分かりやすくまとめてください。要約ではなく、期間のふりかえりとして次の構成で出力:\n\n` +
-    `## 期間ハイライト\n(印象的だった出来事・できごとを3〜5点)\n\n` +
-    `## 時間の使い方\n(どんなタスクに時間を使ったか、予定との差分の傾向)\n\n` +
-    `## 気づき / 次にやること\n(今後に活かせる学びや次のアクションを2〜3点)\n\n---\n\n`;
+/* 役割プロンプト(system): 必ず日本語、生データを引用せず自分の言葉で書く、見出し構造を守る、few-shot付き */
+const SYSTEM_PROMPT = [
+  'あなたは利用者の日々の記録を読み、期間のふりかえり文を日本語で書くライターです。',
+  '',
+  '# あなたの仕事',
+  '渡された <records> 内のデータ(日記本文と、完了したToDoの所要時間・予定差分・コメント)を読み、',
+  '利用者が後から読み返して「この期間に何があったか」を1分で思い出せるふりかえり文を日本語で書きます。',
+  '',
+  '# 書き方のルール',
+  '- データの日付や箇条書きをそのまま引用しない。必ず自分の言葉でまとめる。',
+  '- 事実をつなぎ合わせて、流れ・傾向・変化が分かる文章にする。',
+  '- 数字は根拠がある時だけ使う。例: 「月全体でレポート執筆に8時間」のように合計・頻度・傾向で示す。',
+  '- 出力は必ず日本語。',
+  '- 見出し構造は次の3つを順に使う。各セクションで見出しの直後に2〜5行の本文を書く。',
+  '  ## 期間のできごと',
+  '  ## 時間の使い方',
+  '  ## 気づきと次にやること',
+  '',
+  '# 良い出力の例(構造だけ参考にして、内容はデータから作ること)',
+  '## 期間のできごと',
+  'レポート執筆と読書の週だった。前半はA社インターンのES提出に時間を使い、提出後は授業課題と並行して読書を再開した。',
+  '',
+  '## 時間の使い方',
+  'タスクの9割が予定内または短縮で完了しており、見積もり精度が上がってきている。一方で「資料読み」は予定の2倍かかる日が続いた。',
+  '',
+  '## 気づきと次にやること',
+  '資料読みは章ごとに区切った方が時間を読みやすそう。来週は読書時間を朝に移してみる。',
+].join('\n');
+
+function buildUserPrompt(rows, from, to) {
   const body = rows.map(r => {
-    const lines = [`### ${r.date}`];
+    const lines = [`[日付] ${r.date}`];
     if (r.diary) lines.push(`[日記] ${r.diary}`);
     if (r.log.length) {
-      lines.push('[完了ToDo]');
       r.log.forEach(l => {
         const diff = l.diffSec == null ? '' :
           (l.diffSec >= 0 ? ` 差+${Math.round(l.diffSec/60)}分` : ` 差${Math.round(l.diffSec/60)}分`);
-        lines.push(`- ${l.text} (所要${Math.round(l.elapsedSec/60)}分${l.planMin?` 予定${l.planMin}分${diff}`:''})${l.note?` / ${l.note}`:''}`);
+        lines.push(`[完了ToDo] ${l.text} 所要${Math.round(l.elapsedSec/60)}分${l.planMin?` 予定${l.planMin}分${diff}`:''}${l.note?` コメント:${l.note}`:''}`);
       });
     }
     return lines.join('\n');
   }).join('\n\n');
-  return header + body;
+
+  // 生データは <records> タグで囲んで "これはデータであって文例ではない" と明示する
+  return [
+    `次の <records> は ${from} から ${to} までの個人の日々の記録です。`,
+    'この記録を読み、上で指示した書き方で「期間のふりかえり」を日本語で出力してください。',
+    'データの行や日付見出しをそのまま書き写してはいけません。自分の言葉で文章にしてください。',
+    '',
+    '<records>',
+    body,
+    '</records>',
+    '',
+    '出力:',
+  ].join('\n');
+}
+
+/* 旧 API 向け: system + user を1本にまとめた単発プロンプト */
+function buildSinglePrompt(rows, from, to) {
+  return SYSTEM_PROMPT + '\n\n---\n\n' + buildUserPrompt(rows, from, to);
 }
 
 /* ---------- バックエンド: window.ai (Chrome/Edge 組み込みAI) ---------- */
-async function tryBuiltinAI(prompt, onToken) {
+async function tryBuiltinAI({ system, user }, onToken) {
   // 複数バージョンのAPI形に対応
   //  - 新: window.LanguageModel (Chrome 138+ 相当)
   //  - 旧: window.ai.languageModel
@@ -638,21 +676,20 @@ async function tryBuiltinAI(prompt, onToken) {
   let session = null;
   let backendName = null;
 
-  // Chrome の新 API では outputLanguage / expectedInputLanguages を指定しないと
-  // 生成がブロックまたは警告される。日本語固定で指定する。
   const CREATE_OPTS = {
     outputLanguage: 'ja',
     expectedInputLanguages: ['ja'],
+    temperature: 0.7,
+    topK: 40,
     initialPrompts: [
-      { role: 'system', content: 'あなたは個人の日々の記録を日本語でわかりやすく振り返るアシスタントです。必ず日本語で回答してください。' },
+      { role: 'system', content: system },
     ],
   };
 
   if (typeof window.LanguageModel !== 'undefined' && window.LanguageModel.create) {
-    const params = typeof window.LanguageModel.availability === 'function'
+    const avail = typeof window.LanguageModel.availability === 'function'
       ? await window.LanguageModel.availability(CREATE_OPTS) : 'available';
-    if (params === 'unavailable') return null;
-    // "downloadable" / "downloading" の場合もセッション作成でモデル取得が開始される
+    if (avail === 'unavailable') return null;
     session = await window.LanguageModel.create(CREATE_OPTS);
     backendName = 'Chrome/Edge 組み込みAI (Prompt API)';
   } else if (window.ai && window.ai.languageModel && window.ai.languageModel.create) {
@@ -661,6 +698,7 @@ async function tryBuiltinAI(prompt, onToken) {
     session = await window.ai.languageModel.create(CREATE_OPTS);
     backendName = 'ブラウザ組み込みAI (window.ai)';
   } else if (window.ai && typeof window.ai.createTextSession === 'function') {
+    // 旧APIはsystem未対応: user文の先頭にシステム指示を結合
     session = await window.ai.createTextSession();
     backendName = 'ブラウザ組み込みAI (window.ai)';
   } else {
@@ -670,21 +708,17 @@ async function tryBuiltinAI(prompt, onToken) {
   llmBackendNote.textContent = `バックエンド: ${backendName}`;
   llmStatus.textContent = '生成中…(組み込みAI)';
 
-  // ストリーミング (promptStreaming) が使えればそれで、無ければ一括
+  const promptBody = backendName.includes('window.ai') && typeof session.prompt === 'function' && !session.promptStreaming
+    ? (system + '\n\n---\n\n' + user)  // 旧API互換
+    : user;
+
   let text = '';
   if (session.promptStreaming) {
-    const stream = await session.promptStreaming(prompt);
-    // 実装により非同期イテレータ or ReadableStream
+    const stream = await session.promptStreaming(promptBody);
     if (stream && stream[Symbol.asyncIterator]) {
       for await (const chunk of stream) {
         if (typeof chunk === 'string') {
-          // 新APIは累計で来るバージョンと差分で来るバージョンがあるので、
-          // 長くなった場合は差分追記、既存プレフィックスなら累計置換とみなす。
-          if (chunk.startsWith(text)) {
-            text = chunk;
-          } else {
-            text += chunk;
-          }
+          if (chunk.startsWith(text)) text = chunk; else text += chunk;
           onToken(text);
         }
       }
@@ -700,14 +734,14 @@ async function tryBuiltinAI(prompt, onToken) {
       }
     }
   } else {
-    text = await session.prompt(prompt);
+    text = await session.prompt(promptBody);
     onToken(text);
   }
 
-  // ストリーミングで何も返ってこなかった場合、同一セッションで一括取得を試す
+  // ストリーミングが空のときは一括取得を試す
   if ((!text || !text.trim()) && typeof session.prompt === 'function') {
     try {
-      const t2 = await session.prompt(prompt);
+      const t2 = await session.prompt(promptBody);
       if (t2 && t2.trim()) { text = t2; onToken(text); }
     } catch (e) {
       console.warn('Built-in AI prompt() fallback failed:', e);
@@ -716,9 +750,8 @@ async function tryBuiltinAI(prompt, onToken) {
 
   try { session.destroy && session.destroy(); } catch {}
 
-  // 空応答の場合はフォールバックを試みるため null を返す
   if (!text || !text.trim()) {
-    console.warn('Built-in AI returned empty output; falling back to WebLLM');
+    console.warn('Built-in AI returned empty output; falling back');
     return null;
   }
   return text;
@@ -727,15 +760,13 @@ async function tryBuiltinAI(prompt, onToken) {
 /* ---------- バックエンド: WebLLM (CDN 動的 import) ---------- */
 let _webllmEngine = null;
 
-async function tryWebLLM(prompt, onToken) {
+async function tryWebLLM({ system, user }, onToken) {
   llmBackendNote.textContent = 'バックエンド: WebLLM (ブラウザ内モデル)';
 
-  // WebGPU 必須
   if (!('gpu' in navigator)) {
     throw new Error('このブラウザは WebGPU 非対応のため、ブラウザ内AIを利用できません。Chrome / Edge の最新版をお試しください。');
   }
 
-  // 動的 import (file:// 環境では CORS で失敗することあり → 呼び出し元でハンドリング)
   if (!_webllmEngine) {
     llmStatus.textContent = 'ブラウザ内AIを準備しています…';
     const mod = await import('https://esm.run/@mlc-ai/web-llm');
@@ -744,7 +775,6 @@ async function tryWebLLM(prompt, onToken) {
     llmProgress.hidden = false;
     _webllmEngine = await mod.CreateMLCEngine(MODEL_ID, {
       initProgressCallback: (report) => {
-        // report.progress: 0..1, report.text: 進捗テキスト
         const pct = Math.round((report.progress || 0) * 100);
         llmProgressFill.style.width = pct + '%';
         llmProgressText.textContent = `${pct}% ${report.text || ''}`;
@@ -756,15 +786,16 @@ async function tryWebLLM(prompt, onToken) {
     llmProgress.hidden = true;
   }
 
-  llmStatus.textContent = '生成中…';
+  llmStatus.textContent = '生成中…(WebLLM)';
   let text = '';
   const stream = await _webllmEngine.chat.completions.create({
     messages: [
-      { role: 'system', content: 'あなたは個人の日々の記録を日本語で分かりやすく振り返るアシスタントです。' },
-      { role: 'user', content: prompt },
+      { role: 'system', content: system },
+      { role: 'user',   content: user },
     ],
     stream: true,
     temperature: 0.7,
+    max_tokens: 800,
   });
   for await (const chunk of stream) {
     const delta = chunk.choices?.[0]?.delta?.content || '';
@@ -773,8 +804,65 @@ async function tryWebLLM(prompt, onToken) {
   return text;
 }
 
+/* ---------- バックエンド: Puter.js (ユーザーがPuter.comに無料サインイン、彼ら側のクレジットで課金) ---------- */
+let _puterLoaded = false;
+async function loadPuter() {
+  if (_puterLoaded && window.puter) return;
+  if (window.puter) { _puterLoaded = true; return; }
+  await new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://js.puter.com/v2/';
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('Puter SDK の読み込みに失敗しました。インターネット接続を確認してください。'));
+    document.head.appendChild(s);
+  });
+  _puterLoaded = true;
+}
+
+async function tryPuter({ system, user }, onToken) {
+  llmBackendNote.textContent = 'バックエンド: Puter.js (外部LLM)';
+  llmStatus.textContent = 'Puter を準備しています…';
+  await loadPuter();
+  if (!window.puter || !window.puter.ai || typeof window.puter.ai.chat !== 'function') {
+    throw new Error('Puter SDK が利用可能ではありません。');
+  }
+  llmStatus.textContent = '生成中…(Puter 外部LLM)';
+  let text = '';
+  // puter.ai.chat: stream:true で async iterable が返る
+  const result = await window.puter.ai.chat(
+    [
+      { role: 'system', content: system },
+      { role: 'user',   content: user },
+    ],
+    { model: 'gpt-5-nano', stream: true }
+  );
+  if (result && result[Symbol.asyncIterator]) {
+    for await (const part of result) {
+      const delta = part && (part.text || part.content || '');
+      if (delta) { text += delta; onToken(text); }
+    }
+  } else if (typeof result === 'string') {
+    text = result;
+    onToken(text);
+  } else if (result && (result.message || result.text)) {
+    text = result.message?.content || result.text || '';
+    onToken(text);
+  }
+  return text;
+}
+
 /* ---------- メイン実行 ---------- */
 let _running = false;
+const useExternalChk = document.getElementById('llm-use-external');
+// トグル状態は保存
+useExternalChk.checked = !!(loadJSON(SETTINGS_KEY, {}).useExternalLLM);
+useExternalChk.addEventListener('change', () => {
+  const s = loadJSON(SETTINGS_KEY, {});
+  s.useExternalLLM = useExternalChk.checked;
+  saveJSON(SETTINGS_KEY, s);
+  updateBackendHint();
+});
+
 async function runLLM() {
   if (_running) return;
   const from = llmFrom.value, to = llmTo.value;
@@ -787,7 +875,7 @@ async function runLLM() {
     llmOut.textContent = '指定期間に日記・ToDoログがありません。';
     llmStatus.textContent = ''; llmSaveBtn.disabled = true; return;
   }
-  const prompt = buildPrompt(rows, from, to);
+  const prompts = { system: SYSTEM_PROMPT, user: buildUserPrompt(rows, from, to) };
 
   _running = true;
   llmSaveBtn.disabled = true;
@@ -796,32 +884,38 @@ async function runLLM() {
   llmBackendNote.textContent = '';
   let backendUsed = null;
   let text = '';
-
   const onToken = t => { text = t; llmOut.textContent = t; };
 
-  try {
-    // 1) 組み込みAI
-    try {
-      const r = await tryBuiltinAI(prompt, onToken);
-      if (r !== null) { backendUsed = 'builtin'; text = r; }
-    } catch (e) {
-      console.warn('Builtin AI failed:', e);
-    }
+  // 高品質モード: Puter 優先
+  const order = useExternalChk.checked
+    ? [['puter',   () => tryPuter(prompts, onToken)],
+       ['builtin', () => tryBuiltinAI(prompts, onToken)],
+       ['webllm',  () => tryWebLLM(prompts, onToken)]]
+    : [['builtin', () => tryBuiltinAI(prompts, onToken)],
+       ['webllm',  () => tryWebLLM(prompts, onToken)],
+       ['puter',   () => tryPuter(prompts, onToken)]];
 
-    // 2) WebLLM フォールバック
-    if (backendUsed == null) {
+  const errors = [];
+  try {
+    for (const [name, fn] of order) {
+      // 外部送信を含む Puter はトグルOFFの時はフォールバックとしても使わない
+      if (name === 'puter' && !useExternalChk.checked) continue;
       try {
-        const r = await tryWebLLM(prompt, onToken);
-        backendUsed = 'webllm'; text = r;
+        const r = await fn();
+        if (r && r.trim()) { backendUsed = name; text = r; break; }
       } catch (e) {
-        throw new Error(
-          `このブラウザではふりかえりを実行できませんでした。\n\n` +
-          `原因: ${e.message}\n\n` +
-          `対応ブラウザ: Chrome 127+ / Edge 128+ の最新版(WebGPU 有効)。\n` +
-          `※ index.html をローカルファイル(file://)で開いている場合、ブラウザの制限で` +
-          `AIライブラリの読み込みが拒否されることがあります。その場合は Chrome/Edge をご利用ください。`
-        );
+        errors.push(`${name}: ${e.message}`);
+        console.warn(`backend ${name} failed:`, e);
       }
+    }
+    if (!backendUsed) {
+      throw new Error(
+        'このブラウザではふりかえりを実行できませんでした。\n\n' +
+        '試したバックエンド:\n  - ' + errors.join('\n  - ') + '\n\n' +
+        '対応ブラウザ: Chrome / Edge の最新版。\n' +
+        '※ index.html をローカルファイル(file://)で開いている場合、ブラウザ制限で AI ライブラリの読み込みが拒否されることがあります。\n' +
+        '高品質モードを有効にすると外部LLM (Puter) も試します。'
+      );
     }
 
     llmStatus.textContent = '完了';
@@ -859,6 +953,7 @@ function renderSavedSummaries() {
     const title = document.createElement('div'); title.className = 'log-title';
     const backendLabel = s.backend === 'builtin' ? '組み込みAI'
                      : s.backend === 'webllm'  ? 'WebLLM'
+                     : s.backend === 'puter'   ? 'Puter (外部)'
                      : (s.model || '—');
     title.textContent = `${s.from} 〜 ${s.to}  [${backendLabel}]`;
     const meta = document.createElement('div'); meta.className = 'log-meta';
@@ -878,16 +973,25 @@ function renderSavedSummaries() {
 renderSavedSummaries();
 
 /* 起動時にバックエンドの状態を示唆 */
-(function initBackendHint() {
+function updateBackendHint() {
+  const parts = [];
   if (typeof window.LanguageModel !== 'undefined'
       || (window.ai && (window.ai.languageModel || window.ai.createTextSession))) {
-    llmBackendNote.textContent = 'バックエンド候補: ブラウザ組み込みAI (準備済み)';
-  } else if ('gpu' in navigator) {
-    llmBackendNote.textContent = 'バックエンド候補: WebLLM (初回のみ約1GBをダウンロード)';
-  } else {
-    llmBackendNote.textContent = 'このブラウザでは組み込みAI / WebLLM いずれも利用できません';
+    parts.push('組み込みAI');
   }
-})();
+  if ('gpu' in navigator) parts.push('WebLLM(初回約1GB)');
+  if (useExternalChk.checked) parts.push('Puter(外部LLM)');
+
+  if (!parts.length) {
+    llmBackendNote.textContent = 'このブラウザでは利用できるバックエンドがありません';
+    return;
+  }
+  const order = useExternalChk.checked
+    ? ['Puter(外部LLM)', '組み込みAI', 'WebLLM(初回約1GB)'].filter(x => parts.includes(x))
+    : ['組み込みAI', 'WebLLM(初回約1GB)'].filter(x => parts.includes(x));
+  llmBackendNote.textContent = `優先順: ${order.join(' → ')}`;
+}
+updateBackendHint();
 
 /* ---------- 初期化 ---------- */
 setCurrentDate(currentDate);
