@@ -689,10 +689,49 @@ async function tryBuiltinAI({ system, user }, onToken) {
   if (typeof window.LanguageModel !== 'undefined' && window.LanguageModel.create) {
     const avail = typeof window.LanguageModel.availability === 'function'
       ? await window.LanguageModel.availability(CREATE_OPTS) : 'available';
+
     if (avail === 'unavailable') {
       throw new Error('Chrome 組み込みAI(LanguageModel)は現在の環境では unavailable です。chrome://on-device-internals で状態を確認してください。');
     }
-    session = await window.LanguageModel.create(CREATE_OPTS);
+
+    // availability が 'downloadable' / 'downloading' の場合は、create() で
+    // モデル(Gemini Nano, 約2GB)のダウンロードが走り完了まで戻らない。
+    // 初回のみ長時間かかるため、進捗バーに流しつつ、最大10分でタイムアウト
+    // (時間内に終わらなければ次のバックエンドに回す)。
+    llmStatus.textContent = `組み込みAI availability=${avail}`;
+    const needsDownload = (avail === 'downloadable' || avail === 'downloading');
+    if (needsDownload) {
+      llmProgress.hidden = false;
+      llmProgressFill.style.width = '0%';
+      llmProgressText.textContent = '組み込みAIモデル(Gemini Nano)をダウンロード中…';
+    }
+
+    const createOpts = { ...CREATE_OPTS };
+    // monitor で downloadprogress を購読
+    createOpts.monitor = (m) => {
+      m.addEventListener('downloadprogress', (ev) => {
+        // ev.loaded: 0..1 (環境により 0..total バイト)
+        const ratio = typeof ev.loaded === 'number' && ev.loaded <= 1
+          ? ev.loaded
+          : (ev.total ? ev.loaded / ev.total : 0);
+        const pct = Math.round(ratio * 100);
+        llmProgress.hidden = false;
+        llmProgressFill.style.width = pct + '%';
+        llmProgressText.textContent = `組み込みAIモデル: ${pct}%`;
+      });
+    };
+
+    // タイムアウト付き create: 10分でキャンセル
+    const createPromise = window.LanguageModel.create(createOpts);
+    const timeoutMs = needsDownload ? 10 * 60 * 1000 : 60 * 1000;
+    session = await Promise.race([
+      createPromise,
+      new Promise((_, reject) => setTimeout(
+        () => reject(new Error(`組み込みAIのセッション作成が ${Math.round(timeoutMs/1000)}秒以内に完了しませんでした${needsDownload ? '(モデルDL中の可能性)' : ''}。次のバックエンドを試します。`)),
+        timeoutMs
+      )),
+    ]);
+    llmProgress.hidden = true;
     backendName = 'Chrome/Edge 組み込みAI (Prompt API)';
   } else if (window.ai && window.ai.languageModel && window.ai.languageModel.create) {
     const caps = window.ai.languageModel.capabilities ? await window.ai.languageModel.capabilities() : { available: 'readily' };
@@ -715,36 +754,50 @@ async function tryBuiltinAI({ system, user }, onToken) {
     ? (system + '\n\n---\n\n' + user)  // 旧API互換
     : user;
 
+  // 60秒以内に prompt() が解決しない場合はタイムアウトしてフォールバック
+  const withTimeout = (p, ms, label) => Promise.race([
+    p,
+    new Promise((_, rej) => setTimeout(() => rej(new Error(`${label} が ${ms/1000}秒以内に応答しませんでした`)), ms)),
+  ]);
+
   let text = '';
   if (session.promptStreaming) {
-    const stream = await session.promptStreaming(promptBody);
-    if (stream && stream[Symbol.asyncIterator]) {
-      for await (const chunk of stream) {
-        if (typeof chunk === 'string') {
-          if (chunk.startsWith(text)) text = chunk; else text += chunk;
+    try {
+      const stream = await session.promptStreaming(promptBody);
+      if (stream && stream[Symbol.asyncIterator]) {
+        for await (const chunk of stream) {
+          if (typeof chunk === 'string') {
+            if (chunk.startsWith(text)) text = chunk; else text += chunk;
+            onToken(text);
+          }
+        }
+      } else if (stream && typeof stream.getReader === 'function') {
+        const reader = stream.getReader();
+        const dec = new TextDecoder();
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          const piece = typeof value === 'string' ? value : dec.decode(value);
+          text += piece;
           onToken(text);
         }
       }
-    } else if (stream && typeof stream.getReader === 'function') {
-      const reader = stream.getReader();
-      const dec = new TextDecoder();
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        const piece = typeof value === 'string' ? value : dec.decode(value);
-        text += piece;
-        onToken(text);
-      }
+    } catch (e) {
+      console.warn('promptStreaming failed:', e);
     }
   } else {
-    text = await session.prompt(promptBody);
-    onToken(text);
+    try {
+      text = await withTimeout(session.prompt(promptBody), 90 * 1000, '組み込みAI prompt()');
+      onToken(text);
+    } catch (e) {
+      console.warn('prompt() failed:', e);
+    }
   }
 
-  // ストリーミングが空のときは一括取得を試す
+  // ストリーミングが空のときは一括取得(タイムアウト付き)を試す
   if ((!text || !text.trim()) && typeof session.prompt === 'function') {
     try {
-      const t2 = await session.prompt(promptBody);
+      const t2 = await withTimeout(session.prompt(promptBody), 90 * 1000, '組み込みAI prompt() フォールバック');
       if (t2 && t2.trim()) { text = t2; onToken(text); }
     } catch (e) {
       console.warn('Built-in AI prompt() fallback failed:', e);
