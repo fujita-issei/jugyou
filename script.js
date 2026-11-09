@@ -689,20 +689,23 @@ async function tryBuiltinAI({ system, user }, onToken) {
   if (typeof window.LanguageModel !== 'undefined' && window.LanguageModel.create) {
     const avail = typeof window.LanguageModel.availability === 'function'
       ? await window.LanguageModel.availability(CREATE_OPTS) : 'available';
-    if (avail === 'unavailable') return null;
+    if (avail === 'unavailable') {
+      throw new Error('Chrome 組み込みAI(LanguageModel)は現在の環境では unavailable です。chrome://on-device-internals で状態を確認してください。');
+    }
     session = await window.LanguageModel.create(CREATE_OPTS);
     backendName = 'Chrome/Edge 組み込みAI (Prompt API)';
   } else if (window.ai && window.ai.languageModel && window.ai.languageModel.create) {
     const caps = window.ai.languageModel.capabilities ? await window.ai.languageModel.capabilities() : { available: 'readily' };
-    if (caps.available === 'no') return null;
+    if (caps.available === 'no') {
+      throw new Error('window.ai.languageModel.capabilities()=no のため利用できません。');
+    }
     session = await window.ai.languageModel.create(CREATE_OPTS);
     backendName = 'ブラウザ組み込みAI (window.ai)';
   } else if (window.ai && typeof window.ai.createTextSession === 'function') {
-    // 旧APIはsystem未対応: user文の先頭にシステム指示を結合
     session = await window.ai.createTextSession();
     backendName = 'ブラウザ組み込みAI (window.ai)';
   } else {
-    return null;
+    throw new Error('Chrome 組み込みAI(LanguageModel / window.ai)が存在しません。Chrome の最新版および chrome://flags で Prompt API を有効化してください。');
   }
 
   llmBackendNote.textContent = `バックエンド: ${backendName}`;
@@ -751,8 +754,7 @@ async function tryBuiltinAI({ system, user }, onToken) {
   try { session.destroy && session.destroy(); } catch {}
 
   if (!text || !text.trim()) {
-    console.warn('Built-in AI returned empty output; falling back');
-    return null;
+    throw new Error('組み込みAI: ストリーミング/一括ともに空応答を返しました。モデルのダウンロードがまだ完了していない可能性があります(chrome://on-device-internals で確認)。');
   }
   return text;
 }
@@ -768,8 +770,22 @@ async function tryWebLLM({ system, user }, onToken) {
   }
 
   if (!_webllmEngine) {
-    llmStatus.textContent = 'ブラウザ内AIを準備しています…';
-    const mod = await import('https://esm.run/@mlc-ai/web-llm');
+    llmStatus.textContent = 'WebLLM ライブラリを読み込んでいます… (初回は数秒〜数十秒)';
+    let mod;
+    try {
+      mod = await import('https://esm.run/@mlc-ai/web-llm');
+    } catch (e) {
+      // 一部の環境で esm.run が返す ESM に問題がある場合、jsdelivr の +esm を試す
+      try {
+        mod = await import('https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm/+esm');
+      } catch (e2) {
+        throw new Error(
+          'WebLLM ライブラリを読み込めませんでした。' +
+          '(esm.run: ' + e.message + ' / jsdelivr: ' + e2.message + ') ' +
+          'index.html を file:// で開いている場合、ブラウザが CDN からの動的 import を拒否することがあります。'
+        );
+      }
+    }
     const MODEL_ID = 'Llama-3.2-1B-Instruct-q4f16_1-MLC';
 
     llmProgress.hidden = false;
@@ -909,12 +925,16 @@ async function runLLM() {
       }
     }
     if (!backendUsed) {
+      const detail = errors.length
+        ? '試したバックエンドと失敗理由:\n  - ' + errors.join('\n  - ')
+        : '利用可能なバックエンドがありませんでした。(組み込みAI/WebLLM/Puter いずれも試行せず)';
       throw new Error(
         'このブラウザではふりかえりを実行できませんでした。\n\n' +
-        '試したバックエンド:\n  - ' + errors.join('\n  - ') + '\n\n' +
+        detail + '\n\n' +
         '対応ブラウザ: Chrome / Edge の最新版。\n' +
-        '※ index.html をローカルファイル(file://)で開いている場合、ブラウザ制限で AI ライブラリの読み込みが拒否されることがあります。\n' +
-        '高品質モードを有効にすると外部LLM (Puter) も試します。'
+        '※ index.html を file:// で開いている場合、ブラウザ制限で AI ライブラリの読み込みが拒否されることがあります。\n' +
+        '※ Chrome 組み込みAI(Gemini Nano)は chrome://on-device-internals で有効化状況を確認できます。\n' +
+        '高品質モードを ON にすると外部LLM (Puter) も試します。'
       );
     }
 
