@@ -638,16 +638,27 @@ async function tryBuiltinAI(prompt, onToken) {
   let session = null;
   let backendName = null;
 
+  // Chrome の新 API では outputLanguage / expectedInputLanguages を指定しないと
+  // 生成がブロックまたは警告される。日本語固定で指定する。
+  const CREATE_OPTS = {
+    outputLanguage: 'ja',
+    expectedInputLanguages: ['ja'],
+    initialPrompts: [
+      { role: 'system', content: 'あなたは個人の日々の記録を日本語でわかりやすく振り返るアシスタントです。必ず日本語で回答してください。' },
+    ],
+  };
+
   if (typeof window.LanguageModel !== 'undefined' && window.LanguageModel.create) {
-    const avail = typeof window.LanguageModel.availability === 'function'
-      ? await window.LanguageModel.availability() : 'available';
-    if (avail === 'unavailable') return null;
-    session = await window.LanguageModel.create();
+    const params = typeof window.LanguageModel.availability === 'function'
+      ? await window.LanguageModel.availability(CREATE_OPTS) : 'available';
+    if (params === 'unavailable') return null;
+    // "downloadable" / "downloading" の場合もセッション作成でモデル取得が開始される
+    session = await window.LanguageModel.create(CREATE_OPTS);
     backendName = 'Chrome/Edge 組み込みAI (Prompt API)';
   } else if (window.ai && window.ai.languageModel && window.ai.languageModel.create) {
     const caps = window.ai.languageModel.capabilities ? await window.ai.languageModel.capabilities() : { available: 'readily' };
     if (caps.available === 'no') return null;
-    session = await window.ai.languageModel.create();
+    session = await window.ai.languageModel.create(CREATE_OPTS);
     backendName = 'ブラウザ組み込みAI (window.ai)';
   } else if (window.ai && typeof window.ai.createTextSession === 'function') {
     session = await window.ai.createTextSession();
@@ -657,18 +668,19 @@ async function tryBuiltinAI(prompt, onToken) {
   }
 
   llmBackendNote.textContent = `バックエンド: ${backendName}`;
+  llmStatus.textContent = '生成中…(組み込みAI)';
 
   // ストリーミング (promptStreaming) が使えればそれで、無ければ一括
   let text = '';
   if (session.promptStreaming) {
     const stream = await session.promptStreaming(prompt);
     // 実装により非同期イテレータ or ReadableStream
-    if (stream[Symbol.asyncIterator]) {
+    if (stream && stream[Symbol.asyncIterator]) {
       for await (const chunk of stream) {
-        // chromeは「累計」で来るバージョンと「差分」で来るバージョンがある
         if (typeof chunk === 'string') {
-          // 新APIは累計で来ることが多いのでそのまま代入
-          if (chunk.length >= text.length && chunk.startsWith(text.slice(0, Math.min(20, text.length)))) {
+          // 新APIは累計で来るバージョンと差分で来るバージョンがあるので、
+          // 長くなった場合は差分追記、既存プレフィックスなら累計置換とみなす。
+          if (chunk.startsWith(text)) {
             text = chunk;
           } else {
             text += chunk;
@@ -691,7 +703,24 @@ async function tryBuiltinAI(prompt, onToken) {
     text = await session.prompt(prompt);
     onToken(text);
   }
+
+  // ストリーミングで何も返ってこなかった場合、同一セッションで一括取得を試す
+  if ((!text || !text.trim()) && typeof session.prompt === 'function') {
+    try {
+      const t2 = await session.prompt(prompt);
+      if (t2 && t2.trim()) { text = t2; onToken(text); }
+    } catch (e) {
+      console.warn('Built-in AI prompt() fallback failed:', e);
+    }
+  }
+
   try { session.destroy && session.destroy(); } catch {}
+
+  // 空応答の場合はフォールバックを試みるため null を返す
+  if (!text || !text.trim()) {
+    console.warn('Built-in AI returned empty output; falling back to WebLLM');
+    return null;
+  }
   return text;
 }
 
