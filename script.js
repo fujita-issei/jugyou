@@ -824,50 +824,49 @@ async function tryBuiltinAI({ system, user }, onToken) {
 
 /* ---------- バックエンド: WebLLM (CDN 動的 import) ---------- */
 let _webllmEngine = null;
+let _webllmMod = null;
+const WEBLLM_MODEL_ID = 'Llama-3.2-1B-Instruct-q4f16_1-MLC';
 
-async function tryWebLLM({ system, user }, onToken) {
-  llmBackendNote.textContent = 'バックエンド: WebLLM (ブラウザ内モデル)';
-
-  if (!('gpu' in navigator)) {
-    throw new Error('このブラウザは WebGPU 非対応のため、ブラウザ内AIを利用できません。Chrome / Edge の最新版をお試しください。');
-  }
-
-  if (!_webllmEngine) {
-    llmStatus.textContent = 'WebLLM ライブラリを読み込んでいます… (初回は数秒〜数十秒)';
-    let mod;
+async function loadWebLLMLib() {
+  if (_webllmMod) return _webllmMod;
+  try {
+    _webllmMod = await import('https://esm.run/@mlc-ai/web-llm');
+  } catch (e) {
     try {
-      mod = await import('https://esm.run/@mlc-ai/web-llm');
-    } catch (e) {
-      // 一部の環境で esm.run が返す ESM に問題がある場合、jsdelivr の +esm を試す
-      try {
-        mod = await import('https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm/+esm');
-      } catch (e2) {
-        throw new Error(
-          'WebLLM ライブラリを読み込めませんでした。' +
-          '(esm.run: ' + e.message + ' / jsdelivr: ' + e2.message + ') ' +
-          'index.html を file:// で開いている場合、ブラウザが CDN からの動的 import を拒否することがあります。'
-        );
-      }
+      _webllmMod = await import('https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm/+esm');
+    } catch (e2) {
+      throw new Error(
+        'WebLLM ライブラリを読み込めませんでした。' +
+        '(esm.run: ' + e.message + ' / jsdelivr: ' + e2.message + ') ' +
+        'index.html を file:// で開いている場合、ブラウザが CDN からの動的 import を拒否することがあります。'
+      );
     }
-    const MODEL_ID = 'Llama-3.2-1B-Instruct-q4f16_1-MLC';
-
-    llmProgress.hidden = false;
-    _webllmEngine = await mod.CreateMLCEngine(MODEL_ID, {
-      initProgressCallback: (report) => {
-        const pct = Math.round((report.progress || 0) * 100);
-        llmProgressFill.style.width = pct + '%';
-        llmProgressText.textContent = `${pct}% ${report.text || ''}`;
-        if (report.text && report.text.includes('Finish')) {
-          llmProgressText.textContent = 'モデルの準備が完了しました';
-        }
-      },
-    });
-    llmProgress.hidden = true;
   }
+  return _webllmMod;
+}
 
-  llmStatus.textContent = '生成中…(WebLLM)';
+async function createWebLLMEngine() {
+  const mod = await loadWebLLMLib();
+  llmProgress.hidden = false;
+  llmProgressFill.style.width = '0%';
+  llmProgressText.textContent = 'WebLLM 初期化中…';
+  const engine = await mod.CreateMLCEngine(WEBLLM_MODEL_ID, {
+    initProgressCallback: (report) => {
+      const pct = Math.round((report.progress || 0) * 100);
+      llmProgressFill.style.width = pct + '%';
+      llmProgressText.textContent = `${pct}% ${report.text || ''}`;
+      if (report.text && report.text.includes('Finish')) {
+        llmProgressText.textContent = 'モデルの準備が完了しました';
+      }
+    },
+  });
+  llmProgress.hidden = true;
+  return engine;
+}
+
+async function runWebLLMChat(engine, { system, user }, onToken) {
   let text = '';
-  const stream = await _webllmEngine.chat.completions.create({
+  const stream = await engine.chat.completions.create({
     messages: [
       { role: 'system', content: system },
       { role: 'user',   content: user },
@@ -881,6 +880,38 @@ async function tryWebLLM({ system, user }, onToken) {
     if (delta) { text += delta; onToken(text); }
   }
   return text;
+}
+
+async function tryWebLLM({ system, user }, onToken) {
+  llmBackendNote.textContent = 'バックエンド: WebLLM (ブラウザ内モデル)';
+
+  if (!('gpu' in navigator)) {
+    throw new Error('このブラウザは WebGPU 非対応のため、ブラウザ内AIを利用できません。Chrome / Edge の最新版をお試しください。');
+  }
+
+  // 1回目: キャッシュされた engine があればそれを使う
+  if (!_webllmEngine) {
+    llmStatus.textContent = 'WebLLM ライブラリを読み込んでいます… (初回は数秒〜数十秒)';
+    _webllmEngine = await createWebLLMEngine();
+  }
+
+  llmStatus.textContent = '生成中…(WebLLM)';
+  try {
+    return await runWebLLMChat(_webllmEngine, { system, user }, onToken);
+  } catch (e) {
+    const msg = String(e && e.message || e);
+    console.warn('WebLLM chat failed, attempting engine rebuild:', e);
+    // "Object has already been disposed" などは engine が無効化されている。
+    // 既存を破棄して1回だけ作り直す。
+    const disposed = /disposed|destroyed|detached|lost|invalid state|has already been/i.test(msg);
+    if (!disposed) throw e;
+    try { _webllmEngine.unload && await _webllmEngine.unload(); } catch {}
+    _webllmEngine = null;
+    llmStatus.textContent = 'WebLLM を再初期化しています…';
+    _webllmEngine = await createWebLLMEngine();
+    llmStatus.textContent = '生成中…(WebLLM 再試行)';
+    return await runWebLLMChat(_webllmEngine, { system, user }, onToken);
+  }
 }
 
 /* ---------- バックエンド: Puter.js (ユーザーがPuter.comに無料サインイン、彼ら側のクレジットで課金) ---------- */
@@ -991,13 +1022,17 @@ async function runLLM() {
       const detail = errors.length
         ? '試したバックエンドと失敗理由:\n  - ' + errors.join('\n  - ')
         : '利用可能なバックエンドがありませんでした。(組み込みAI/WebLLM/Puter いずれも試行せず)';
+      const hints = [
+        '対応ブラウザ: Chrome / Edge の最新版。',
+        '※ index.html を file:// で開いている場合、ブラウザ制限で AI ライブラリの読み込みが拒否されることがあります。',
+        '※ Chrome 組み込みAI(Gemini Nano)は chrome://on-device-internals で有効化状況を確認できます。',
+        '※ シークレットウィンドウでは WebLLM の IndexedDB キャッシュ/WebGPU が制限されることがあります。通常ウィンドウで開き直してください。',
+        '高品質モードを ON にすると外部LLM (Puter) も試します。',
+      ];
       throw new Error(
         'このブラウザではふりかえりを実行できませんでした。\n\n' +
         detail + '\n\n' +
-        '対応ブラウザ: Chrome / Edge の最新版。\n' +
-        '※ index.html を file:// で開いている場合、ブラウザ制限で AI ライブラリの読み込みが拒否されることがあります。\n' +
-        '※ Chrome 組み込みAI(Gemini Nano)は chrome://on-device-internals で有効化状況を確認できます。\n' +
-        '高品質モードを ON にすると外部LLM (Puter) も試します。'
+        hints.join('\n')
       );
     }
 
