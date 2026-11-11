@@ -850,18 +850,21 @@ async function createWebLLMEngine() {
   llmProgress.hidden = false;
   llmProgressFill.style.width = '0%';
   llmProgressText.textContent = 'WebLLM 初期化中…';
-  const engine = await mod.CreateMLCEngine(WEBLLM_MODEL_ID, {
-    initProgressCallback: (report) => {
-      const pct = Math.round((report.progress || 0) * 100);
-      llmProgressFill.style.width = pct + '%';
-      llmProgressText.textContent = `${pct}% ${report.text || ''}`;
-      if (report.text && report.text.includes('Finish')) {
-        llmProgressText.textContent = 'モデルの準備が完了しました';
-      }
-    },
-  });
-  llmProgress.hidden = true;
-  return engine;
+  try {
+    return await mod.CreateMLCEngine(WEBLLM_MODEL_ID, {
+      initProgressCallback: (report) => {
+        const pct = Math.round((report.progress || 0) * 100);
+        llmProgressFill.style.width = pct + '%';
+        llmProgressText.textContent = `${pct}% ${report.text || ''}`;
+        if (report.text && report.text.includes('Finish')) {
+          llmProgressText.textContent = 'モデルの準備が完了しました';
+        }
+      },
+    });
+  } finally {
+    // 失敗時も進捗バーを残さない
+    llmProgress.hidden = true;
+  }
 }
 
 async function runWebLLMChat(engine, { system, user }, onToken) {
@@ -882,35 +885,40 @@ async function runWebLLMChat(engine, { system, user }, onToken) {
   return text;
 }
 
+// engine / WebGPU デバイスが無効化されたときのエラー("Object has already been disposed" 等)
+const WEBLLM_DISPOSED_RE = /disposed|destroyed|detached|lost|invalid state|has already been/i;
+
 async function tryWebLLM({ system, user }, onToken) {
   llmBackendNote.textContent = 'バックエンド: WebLLM (ブラウザ内モデル)';
 
   if (!('gpu' in navigator)) {
     throw new Error('このブラウザは WebGPU 非対応のため、ブラウザ内AIを利用できません。Chrome / Edge の最新版をお試しください。');
   }
-
-  // 1回目: キャッシュされた engine があればそれを使う
-  if (!_webllmEngine) {
-    llmStatus.textContent = 'WebLLM ライブラリを読み込んでいます… (初回は数秒〜数十秒)';
-    _webllmEngine = await createWebLLMEngine();
+  // navigator.gpu があっても GPU が使えない環境がある(ドライバ非対応・ブロックリスト等)
+  const adapter = await navigator.gpu.requestAdapter().catch(() => null);
+  if (!adapter) {
+    throw new Error('WebGPU の GPU アダプタを取得できませんでした(GPU が無効、またはドライバが非対応)。chrome://gpu の「WebGPU」の状態を確認してください。');
   }
 
-  llmStatus.textContent = '生成中…(WebLLM)';
-  try {
-    return await runWebLLMChat(_webllmEngine, { system, user }, onToken);
-  } catch (e) {
-    const msg = String(e && e.message || e);
-    console.warn('WebLLM chat failed, attempting engine rebuild:', e);
-    // "Object has already been disposed" などは engine が無効化されている。
-    // 既存を破棄して1回だけ作り直す。
-    const disposed = /disposed|destroyed|detached|lost|invalid state|has already been/i.test(msg);
-    if (!disposed) throw e;
-    try { _webllmEngine.unload && await _webllmEngine.unload(); } catch {}
-    _webllmEngine = null;
-    llmStatus.textContent = 'WebLLM を再初期化しています…';
-    _webllmEngine = await createWebLLMEngine();
-    llmStatus.textContent = '生成中…(WebLLM 再試行)';
-    return await runWebLLMChat(_webllmEngine, { system, user }, onToken);
+  // エンジン作成と生成のどちらで無効化エラーが出ても、作り直して1回だけ再試行する
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      if (!_webllmEngine) {
+        llmStatus.textContent = attempt === 1
+          ? 'WebLLM ライブラリを読み込んでいます… (初回は数秒〜数十秒)'
+          : 'WebLLM を再初期化しています…';
+        _webllmEngine = await createWebLLMEngine();
+      }
+      llmStatus.textContent = attempt === 1 ? '生成中…(WebLLM)' : '生成中…(WebLLM 再試行)';
+      return await runWebLLMChat(_webllmEngine, { system, user }, onToken);
+    } catch (e) {
+      const msg = String(e && e.message || e);
+      console.warn(`WebLLM attempt ${attempt} failed:`, e);
+      // 失敗した engine は再利用しない(次回クリック時も作り直す)
+      try { _webllmEngine && _webllmEngine.unload && await _webllmEngine.unload(); } catch {}
+      _webllmEngine = null;
+      if (attempt === 2 || !WEBLLM_DISPOSED_RE.test(msg)) throw e;
+    }
   }
 }
 
@@ -931,6 +939,10 @@ async function loadPuter() {
 
 async function tryPuter({ system, user }, onToken) {
   llmBackendNote.textContent = 'バックエンド: Puter.js (外部LLM)';
+  if (location.protocol === 'file:') {
+    // Puter はページの origin でサインインするため、file:// では必ず失敗する
+    throw new Error('Puter はファイルを直接開いた状態(file://)では使えません。start-app.ps1(またはデスクトップのショートカット)から http://localhost:8765/ で開いてください。');
+  }
   llmStatus.textContent = 'Puter を準備しています…';
   await loadPuter();
   if (!window.puter || !window.puter.ai || typeof window.puter.ai.chat !== 'function') {
@@ -1024,7 +1036,9 @@ async function runLLM() {
         : '利用可能なバックエンドがありませんでした。(組み込みAI/WebLLM/Puter いずれも試行せず)';
       const hints = [
         '対応ブラウザ: Chrome / Edge の最新版。',
-        '※ index.html を file:// で開いている場合、ブラウザ制限で AI ライブラリの読み込みが拒否されることがあります。',
+        ...(location.protocol === 'file:'
+          ? ['※ いまファイルを直接開いています(file://)。AI ライブラリの読み込みや Puter が拒否されるため、start-app.ps1(またはデスクトップのショートカット)から http://localhost:8765/ で開いてください。']
+          : []),
         '※ Chrome 組み込みAI(Gemini Nano)は chrome://on-device-internals で有効化状況を確認できます。',
         '※ シークレットウィンドウでは WebLLM の IndexedDB キャッシュ/WebGPU が制限されることがあります。通常ウィンドウで開き直してください。',
         '高品質モードを ON にすると外部LLM (Puter) も試します。',
@@ -1055,6 +1069,8 @@ async function runLLM() {
     llmStatus.textContent = '実行できません';
     llmOut.textContent = e.message;
   } finally {
+    // どのバックエンドで失敗しても進捗バーを残さない
+    llmProgress.hidden = true;
     _running = false;
   }
 }
