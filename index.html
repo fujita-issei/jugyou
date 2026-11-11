@@ -87,7 +87,29 @@
     <!-- 3. タイマー -->
     <section id="view-timer" class="view">
       <div class="view-title">タイマー画面</div>
-      <div class="layout">
+      <div class="layout two-col">
+        <div class="box">
+          <div class="box-label">単独タイマー</div>
+          <div class="box-desc">ToDo とは関係なく使えるタイマーです。何の時間かの入力は任意です。</div>
+          <div class="todo-form">
+            <input type="text" id="solo-label" placeholder="何の時間か（任意・例: 英単語）" maxlength="100">
+            <input type="number" id="solo-plan" placeholder="予定(分・任意)" min="1" step="1">
+          </div>
+          <div class="active-timer">
+            <div id="solo-time" class="big-time">00:00</div>
+            <div id="solo-plan-info" class="big-plan">予定時間なし（0秒から計測）</div>
+            <div class="btn-row">
+              <button id="solo-start" class="link-btn primary">▶ 開始</button>
+              <button id="solo-finish" class="link-btn sm" disabled>✓ 終了して記録</button>
+              <button id="solo-reset" class="link-btn sm" disabled>↺ リセット</button>
+            </div>
+          </div>
+          <div class="log-section">
+            <div class="box-label alt">今日のタイマー記録</div>
+            <ul id="solo-log" class="todo-log"></ul>
+            <div id="solo-log-empty" class="hint">今日のタイマー記録はまだありません。</div>
+          </div>
+        </div>
         <div class="box">
           <div class="box-label">進行中のタスク</div>
           <div id="active-timer" class="active-timer">

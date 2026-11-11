@@ -546,6 +546,131 @@ function checkTimerNotification() {
   });
 }
 
+/* ---------- 単独タイマー (ToDo に紐づかないタイマー) ----------
+ * - 何の時間か(ラベル)と予定(分)はどちらも任意
+ * - 状態は localStorage に保存するので、再読み込みしても計測は続く
+ * - 「終了して記録」で solotimerlog:YYYY-MM-DD に記録し、ふりかえりの材料にもなる
+ * - タスクのタイマーとは独立して動く
+ */
+const SOLO_KEY = 'solotimer';
+const SOLO_LOG_KEY = 'solotimerlog:';   // solotimerlog:YYYY-MM-DD
+const soloLabelEl = document.getElementById('solo-label');
+const soloPlanEl  = document.getElementById('solo-plan');
+const soloTimeEl  = document.getElementById('solo-time');
+const soloPlanInfoEl = document.getElementById('solo-plan-info');
+const soloStartBtn  = document.getElementById('solo-start');
+const soloFinishBtn = document.getElementById('solo-finish');
+const soloResetBtn  = document.getElementById('solo-reset');
+const soloLogEl = document.getElementById('solo-log');
+const soloLogEmptyEl = document.getElementById('solo-log-empty');
+
+const SOLO_DEFAULT = { label: '', planMin: null, elapsedSec: 0, running: false, startedAt: null, notified: false, startDate: null };
+const getSolo = () => ({ ...SOLO_DEFAULT, ...loadJSON(SOLO_KEY, {}) });
+const setSolo = s => saveJSON(SOLO_KEY, s);
+const soloElapsed = s => s.running && s.startedAt ? s.elapsedSec + (Date.now() - s.startedAt) / 1000 : s.elapsedSec;
+
+// 入力欄の値はその場で保存(計測中にラベルを書き足してもよい)
+soloLabelEl.addEventListener('input', () => { const s = getSolo(); s.label = soloLabelEl.value; setSolo(s); });
+soloPlanEl.addEventListener('input', () => {
+  const s = getSolo(); s.planMin = Number(soloPlanEl.value) || null; s.notified = false; setSolo(s); renderSolo();
+});
+
+soloStartBtn.addEventListener('click', () => {
+  const s = getSolo();
+  if (s.running) {
+    s.elapsedSec += (Date.now() - s.startedAt) / 1000;
+    s.running = false; s.startedAt = null;
+  } else {
+    s.running = true; s.startedAt = Date.now();
+    if (!s.startDate) s.startDate = todayStr();
+  }
+  setSolo(s); renderSolo();
+});
+
+soloFinishBtn.addEventListener('click', () => {
+  const s = getSolo();
+  const elapsed = soloElapsed(s);
+  if (elapsed < 1) return;
+  const date = todayStr();
+  const log = loadJSON(SOLO_LOG_KEY + date, []);
+  log.push({
+    id: Date.now(),
+    label: (s.label || '').trim(),
+    planMin: s.planMin,
+    elapsedSec: Math.round(elapsed),
+    diffSec: s.planMin ? Math.round(elapsed - s.planMin * 60) : null,
+    finishedAt: Date.now(),
+  });
+  saveJSON(SOLO_LOG_KEY + date, log);
+  // ラベルと予定は次回のために残し、時間だけ戻す
+  setSolo({ ...SOLO_DEFAULT, label: s.label, planMin: s.planMin });
+  renderSolo(); renderSoloLog();
+});
+
+soloResetBtn.addEventListener('click', () => {
+  const s = getSolo();
+  if (soloElapsed(s) >= 1 && !confirm('記録せずに時間を0に戻しますか？')) return;
+  setSolo({ ...SOLO_DEFAULT, label: s.label, planMin: s.planMin });
+  renderSolo();
+});
+
+function renderSolo() {
+  const s = getSolo();
+  const elapsed = soloElapsed(s);
+  soloTimeEl.textContent = fmtTime(elapsed);
+  if (document.activeElement !== soloLabelEl) soloLabelEl.value = s.label || '';
+  if (document.activeElement !== soloPlanEl)  soloPlanEl.value = s.planMin || '';
+  soloPlanInfoEl.classList.remove('over');
+  if (s.planMin) {
+    const remain = s.planMin * 60 - elapsed;
+    if (remain >= 0) soloPlanInfoEl.textContent = `予定 ${s.planMin}分 / 残り ${fmtTime(remain)}`;
+    else { soloPlanInfoEl.textContent = `予定 ${s.planMin}分 / ⚠ 超過 +${fmtTime(-remain)}`; soloPlanInfoEl.classList.add('over'); }
+  } else {
+    soloPlanInfoEl.textContent = '予定時間なし（0秒から計測）';
+  }
+  soloStartBtn.textContent = s.running ? '⏸ 一時停止' : (elapsed >= 1 ? '▶ 再開' : '▶ 開始');
+  soloFinishBtn.disabled = elapsed < 1;
+  soloResetBtn.disabled = elapsed < 1;
+}
+
+function renderSoloLog() {
+  const log = loadJSON(SOLO_LOG_KEY + todayStr(), []);
+  soloLogEl.innerHTML = '';
+  soloLogEmptyEl.style.display = log.length ? 'none' : 'block';
+  log.forEach(l => {
+    const li = document.createElement('li');
+    const title = document.createElement('div'); title.className = 'log-title';
+    title.textContent = l.label || '（名前なし）';
+    const meta = document.createElement('div'); meta.className = 'log-meta';
+    const parts = [`所要 ${fmtTime(l.elapsedSec)}`];
+    if (l.planMin) parts.push(`予定 ${l.planMin}分`);
+    if (l.diffSec != null) parts.push(`差 ${l.diffSec >= 0 ? '+' : '-'}${fmtTime(Math.abs(l.diffSec))}`);
+    if (l.finishedAt) parts.push(new Date(l.finishedAt).toLocaleTimeString('ja-JP'));
+    meta.textContent = parts.join(' / ');
+    li.append(title, meta);
+    soloLogEl.appendChild(li);
+  });
+}
+
+function checkSoloNotification() {
+  const s = getSolo();
+  if (!s.running || !s.planMin || s.notified) return;
+  if (soloElapsed(s) >= s.planMin * 60) {
+    s.notified = true; setSolo(s);
+    notifyUser('⏰ 予定時間に到達', `${s.label || 'タイマー'}（${s.planMin}分）`);
+  }
+}
+
+renderSolo();
+renderSoloLog();
+let _soloLogDate = todayStr();
+setInterval(() => {
+  renderSolo();
+  checkSoloNotification();
+  // 日付が変わったら「今日の記録」を切り替える
+  if (todayStr() !== _soloLogDate) { _soloLogDate = todayStr(); renderSoloLog(); }
+}, 1000);
+
 /* ---------- 期間ふりかえり (ブラウザ内蔵AI → WebLLM 自動フォールバック) ----------
  * 戦略:
  *   1) window.ai (Chrome/Edge Prompt API, LanguageModel) が利用可能ならそれで生成
@@ -601,7 +726,8 @@ function collectRange(from, to) {
     const log = loadJSON(LOG_KEY + cur, []);
     // 期間内に登録されたまま完了していない ToDo(「次にやること」の根拠)
     const pending = (loadJSON(TODO_KEY + cur, []) || []).filter(t => t && !t.done);
-    if (diary || log.length || pending.length) rows.push({ date: cur, diary, log, pending });
+    const solo = loadJSON(SOLO_LOG_KEY + cur, []);   // 単独タイマーの記録
+    if (diary || log.length || pending.length || solo.length) rows.push({ date: cur, diary, log, pending, solo });
     cur = addDays(cur, 1);
   }
   return rows;
@@ -621,76 +747,120 @@ function collectUpcoming(to, days = UPCOMING_DAYS) {
   return out;
 }
 
-/* 役割プロンプト(system): 必ず日本語、記録にある事実だけを書く(ハルシネーション対策)、見出し構造を守る。
- * 以前の few-shot 例文は小型モデルが内容ごと写してしまったため削除した。 */
-const SYSTEM_PROMPT = [
-  'あなたは利用者の日々の記録を読み、期間のふりかえり文を日本語で書くライターです。',
-  '',
-  '# あなたの仕事',
-  '渡された <records> 内のデータ(日記本文、完了したToDoの所要時間・予定差分・コメント、未完了のToDo、',
-  '期間後に予定済みのToDo)を読み、利用者が後から読み返して「ある日からある日までの期間に何があったか」を',
-  '1分で思い出せるふりかえり文を日本語で書きます。日々のログを並べ直すのではなく、期間全体を通してまとめます。',
-  '',
+/* ふりかえりの組み立て方
+ * 以前は日記と ToDo を日付ごとに混ぜて1回で生成させていたが、小型モデルは整形された
+ * ToDo 行だけを拾い、日記を無視した。そこでセクションごとに分ける:
+ *   ## 期間のできごと   … 日記「だけ」を渡して LLM で文章化
+ *   ## タスクの取り組み … 合計時間などは JS で正確に計算し、LLM はそれを文章化するだけ
+ *      次にやること:     … LLM を使わず、未完了/予定済み ToDo を JS で列挙(作り話の余地をなくす)
+ * データが無いセクションは LLM を呼ばずに「記録なし」とする。
+ */
+const GROUNDING_RULES = [
   '# 最重要ルール: 想像で書かない',
-  '- <records> に書かれている事実だけを使う。記録にない出来事・人物・場所・感情・理由・予定を足さない。',
+  '- <data> に書かれている事実だけを使う。書かれていない出来事・人物・場所・感情・理由・予定を足さない。',
   '- 推測・解釈・励まし・一般的なアドバイスは書かない。「〜だろう」「〜と思われる」「〜しそう」も使わない。',
-  '- 数字(時間・回数)は記録の値をそのまま使うか、記録の値を足し合わせた結果だけを書く。',
-  '- 記録から言えないことは書かない。書くことがないセクションは「記録なし」と1行だけ書く。',
-  '- 短くてよい。分からない部分を埋めるために文章を長くしない。',
-  '',
-  '# 書き方',
-  '- 出力は必ず日本語。',
-  '- 見出しは次の2つだけを、この順で使う。',
-  '  ## 期間のできごと',
-  '    日記に書かれた出来事を、期間全体の流れが分かるように短い文章でまとめる。',
-  '  ## タスクの取り組み',
-  '    完了したToDoについて、何にどれだけ時間を使い、予定とどれだけ差があったかを記録の数字でまとめる。',
-  '    その後に「次にやること:」と書き、次のものだけを箇条書きで挙げる。',
-  '      - [未完了ToDo] と [予定済みToDo] のタスク名(予定済みは日付も添える)',
-  '      - 日記や完了コメントに本人がはっきり書いた、これからやる予定',
-  '    どれもなければ「次にやること: 記録なし」と書く。自分で考えた提案は加えない。',
+  '- 出力は必ず日本語の文章。見出し・箇条書き・日付の一覧は書かない。',
 ].join('\n');
 
-function buildUserPrompt(rows, from, to) {
-  const body = rows.map(r => {
-    const lines = [`[日付] ${r.date}`];
-    if (r.diary) lines.push(`[日記] ${r.diary}`);
-    if (r.log.length) {
-      r.log.forEach(l => {
-        const diff = l.diffSec == null ? '' :
-          (l.diffSec >= 0 ? ` 差+${Math.round(l.diffSec/60)}分` : ` 差${Math.round(l.diffSec/60)}分`);
-        lines.push(`[完了ToDo] ${l.text} 所要${Math.round(l.elapsedSec/60)}分${l.planMin?` 予定${l.planMin}分${diff}`:''}${l.note?` コメント:${l.note}`:''}`);
-      });
-    }
-    (r.pending || []).forEach(t => {
-      lines.push(`[未完了ToDo] ${t.text}${t.planMin ? ` 予定${t.planMin}分` : ''}`);
-    });
-    return lines.join('\n');
-  }).join('\n\n');
+const DIARY_SYSTEM_PROMPT = [
+  'あなたは利用者の日記を読み、ある期間に何があったかを日本語でまとめる書き手です。',
+  '<data> には期間内の日記が日付順に入っています。',
+  '期間全体の流れが分かるように、出来事を時系列の文章にまとめてください。',
+  '<data> にあるすべての日について、その日の主な出来事に1文ずつ触れてください。日を飛ばさないでください。',
+  '日記に書かれた具体的な出来事(何をしたか・どこへ行ったか・誰と会ったか)を含めてください。',
+  '「早めに寝た」「落ち着いた一日だった」のような毎日の決まった文句は省いてかまいません。',
+  'ある日の出来事を別の日のこととして書かないでください。日付を書く場合は <data> の日付どおりに書いてください。',
+  '',
+  GROUNDING_RULES,
+].join('\n');
 
-  const upcoming = collectUpcoming(to);
-  const upcomingBlock = upcoming.length
-    ? '\n\n[期間後の予定]\n' + upcoming.map(u =>
-        `[予定済みToDo] ${u.date} ${u.text}${u.planMin ? ` 予定${u.planMin}分` : ''}`).join('\n')
-    : '';
+const fmtMin = sec => {
+  const m = Math.round(sec / 60);
+  return m >= 60 ? `${Math.floor(m / 60)}時間${m % 60 ? (m % 60) + '分' : ''}` : `${m}分`;
+};
 
-  // 生データは <records> タグで囲んで "これはデータであって文例ではない" と明示する
+/* 日記を約 maxChars 文字ずつ、日付順のまとまりに分ける。
+ * WebLLM のモデルは入力が 4096 トークンまでなので、1か月分などを一度に渡すと溢れる。
+ * まとまりごとに生成すれば、離れた日の出来事を混同することもない。 */
+// 検証で 18日分(約1400字)を一度に渡すと、2B モデルは大半の日を飛ばしたため、小さめに区切る
+const DIARY_CHUNK_CHARS = 700;
+function chunkDiaryRows(rows, maxChars = DIARY_CHUNK_CHARS) {
+  const chunks = []; let cur = []; let size = 0;
+  rows.filter(r => r.diary.trim()).forEach(r => {
+    const len = r.diary.trim().length + 20;
+    if (cur.length && size + len > maxChars) { chunks.push(cur); cur = []; size = 0; }
+    cur.push(r); size += len;
+  });
+  if (cur.length) chunks.push(cur);
+  return chunks;
+}
+
+function buildDiaryUser(rows) {
+  const diaryRows = rows.filter(r => r.diary.trim());
+  const from = diaryRows[0].date, to = diaryRows[diaryRows.length - 1].date;
+  // 1日分が極端に長い場合も入力上限を超えないよう切り詰める
+  const body = diaryRows.map(r => `${fmtJP(r.date)}\n${r.diary.trim().slice(0, 2500)}`).join('\n\n');
   return [
-    `次の <records> は ${from} から ${to} までの個人の日々の記録です。`,
-    'この記録だけを根拠に、上で指示した2つの見出しで「期間のふりかえり」を日本語で出力してください。',
-    '記録に書かれていないことは一切書かないでください。',
+    `次の <data> は ${from} から ${to} までの日記です。`,
+    'この日記に書かれていることだけを使って、期間に何があったかを文章でまとめてください。',
     '',
-    '<records>',
-    body + upcomingBlock,
-    '</records>',
-    '',
-    '出力:',
+    '<data>', body, '</data>',
   ].join('\n');
 }
 
-/* 旧 API 向け: system + user を1本にまとめた単発プロンプト */
-function buildSinglePrompt(rows, from, to) {
-  return SYSTEM_PROMPT + '\n\n---\n\n' + buildUserPrompt(rows, from, to);
+/* 完了タスクとタイマー記録を集計(数字は LLM に計算させない) */
+function summarizeTasks(rows) {
+  const items = [];
+  rows.forEach(r => {
+    r.log.forEach(l => items.push({ kind: 'ToDo', date: r.date, name: l.text, ...l }));
+    (r.solo || []).forEach(l => items.push({ kind: 'タイマー', date: r.date, name: l.label || '（名前なし）', ...l }));
+  });
+  const byName = new Map();
+  items.forEach(i => {
+    const k = `${i.kind}:${i.name}`;
+    const g = byName.get(k) || { kind: i.kind, name: i.name, count: 0, sec: 0 };
+    g.count++; g.sec += i.elapsedSec || 0;
+    byName.set(k, g);
+  });
+  const planned = items.filter(i => i.planMin && i.diffSec != null);
+  const over = planned.filter(i => i.diffSec > 0);
+  return {
+    items,
+    groups: [...byName.values()].sort((a, b) => b.sec - a.sec),
+    totalSec: items.reduce((s, i) => s + (i.elapsedSec || 0), 0),
+    plannedCount: planned.length,
+    overCount: over.length,
+    overSec: over.reduce((s, i) => s + i.diffSec, 0),
+    underCount: planned.length - over.length,
+  };
+}
+
+/* タスクの取り組み: 検証で小型モデルが数字や日付を書き換えたため、LLM を使わず記録から組み立てる */
+function buildTaskSection(rows) {
+  const s = summarizeTasks(rows);
+  if (!s.items.length) return '完了したタスク・タイマーの記録なし';
+  const lines = [`完了したタスクとタイマー記録は${s.items.length}件、合計${fmtMin(s.totalSec)}でした。`];
+  s.groups.forEach(g => lines.push(`- ${g.name}（${g.kind}）: ${g.count}回・${fmtMin(g.sec)}`));
+  if (s.plannedCount) {
+    lines.push(`予定時間を決めていた${s.plannedCount}件のうち、予定内に終わったのは${s.underCount}件、予定を超えたのは${s.overCount}件` +
+      (s.overCount ? `（超過の合計${fmtMin(s.overSec)}）` : '') + 'でした。');
+  }
+  const notes = s.items.filter(i => i.note && i.note.trim());
+  if (notes.length) {
+    lines.push('コメント:');
+    notes.forEach(i => lines.push(`- ${fmtJP(i.date)}「${i.name}」: ${i.note.trim()}`));
+  }
+  return lines.join('\n');
+}
+
+/* 次にやること: LLM を使わず記録から列挙 */
+function buildNextList(rows, to) {
+  const out = [];
+  rows.forEach(r => (r.pending || []).forEach(t =>
+    out.push(`- ${t.text}（${fmtJP(r.date)}に登録・未完了）`)));
+  collectUpcoming(to).forEach(u =>
+    out.push(`- ${u.text}（${fmtJP(u.date)}の予定）`));
+  return out.length ? out.join('\n') : '- 記録なし';
 }
 
 /* ---------- バックエンド: window.ai (Chrome/Edge 組み込みAI) ---------- */
@@ -853,15 +1023,25 @@ let _webllmEngine = null;
 let _webllmMod = null;
 // Llama-3.2-1B は日本語がほぼ書けず意味不明な文になったため、日本語に強い Qwen2.5 を優先する。
 // 上から順に、WebLLM の prebuiltAppConfig に存在する最初のモデルを使う。
+// 2026-11-11 に同じテストデータで比較した結果(日記3日分):
+//   Qwen3.5-2B      … 記録どおり・抜けなし・日付の取り違えなし (採用)
+//   gemma-2-2b-jpn  … 作り話なし、ただし一部の出来事が抜ける
+//   Qwen2.5-1.5B    … 別の日の出来事を混ぜる
+//   Qwen2.5-3B      … 「毎日図書館に通い」など記録にない一般化をする
+//   Llama-3.2-1B    … 日本語として意味が通らない
 const WEBLLM_MODEL_CANDIDATES = [
+  'Qwen3.5-2B-q4f16_1-MLC',
+  'gemma-2-2b-jpn-it-q4f16_1-MLC',
   'Qwen2.5-1.5B-Instruct-q4f16_1-MLC',
-  'Qwen2-1.5B-Instruct-q4f16_1-MLC',
   'Llama-3.2-1B-Instruct-q4f16_1-MLC',
 ];
 let WEBLLM_MODEL_ID = WEBLLM_MODEL_CANDIDATES[0];
 
 function pickWebLLMModel(mod) {
   const list = mod && mod.prebuiltAppConfig && mod.prebuiltAppConfig.model_list;
+  // 検証用: ?webllm-model=<model_id> で一時的にモデルを差し替えられる
+  const override = new URLSearchParams(location.search).get('webllm-model');
+  if (override && Array.isArray(list) && list.some(m => m.model_id === override)) return override;
   if (!Array.isArray(list)) return WEBLLM_MODEL_CANDIDATES[0];
   const ids = new Set(list.map(m => m.model_id));
   return WEBLLM_MODEL_CANDIDATES.find(id => ids.has(id)) || WEBLLM_MODEL_CANDIDATES[0];
@@ -926,16 +1106,23 @@ async function runWebLLMChat(engine, { system, user }, onToken) {
   });
   for await (const chunk of stream) {
     const delta = chunk.choices?.[0]?.delta?.content || '';
-    if (delta) { text += delta; onToken(text); }
+    if (delta) { text += delta; onToken(stripThink(text)); }
   }
-  return text;
+  return stripThink(text);
+}
+
+// Qwen3 系は <think>…</think>(思考欄)を出すことがあるので表示から除く
+function stripThink(t) {
+  return t.replace(/<think>[\s\S]*?(<\/think>|$)/g, '').replace(/^\s+/, '');
 }
 
 // engine / WebGPU デバイスが無効化されたときのエラー("Object has already been disposed" 等)
 const WEBLLM_DISPOSED_RE = /disposed|destroyed|detached|lost|invalid state|has already been/i;
 
 async function tryWebLLM({ system, user }, onToken) {
-  llmBackendNote.textContent = 'バックエンド: WebLLM (ブラウザ内モデル)';
+  llmBackendNote.textContent = _webllmEngine
+    ? `バックエンド: WebLLM (${WEBLLM_MODEL_ID})`
+    : 'バックエンド: WebLLM (ブラウザ内モデル)';
 
   if (!('gpu' in navigator)) {
     throw new Error('このブラウザは WebGPU 非対応のため、ブラウザ内AIを利用できません。Chrome / Edge の最新版をお試しください。');
@@ -1043,7 +1230,22 @@ async function runLLM() {
     llmOut.textContent = '指定期間に日記・ToDoログがありません。';
     llmStatus.textContent = ''; llmSaveBtn.disabled = true; return;
   }
-  const prompts = { system: SYSTEM_PROMPT, user: buildUserPrompt(rows, from, to) };
+  // セクションごとの生成ジョブ(データがあるものだけ LLM を呼ぶ)
+  const hasDiary = rows.some(r => r.diary.trim());
+  // LLM に書かせるのは日記のまとめだけ。タスクと次にやることは記録から組み立てる
+  const jobs = [];
+  if (hasDiary) {
+    chunkDiaryRows(rows).forEach(chunk =>
+      jobs.push({ key: 'diary', system: DIARY_SYSTEM_PROMPT, user: buildDiaryUser(chunk) }));
+  }
+  const nextList = buildNextList(rows, to);
+
+  const sections = { diary: hasDiary ? '' : '日記の記録なし', task: buildTaskSection(rows) };
+  const compose = () => [
+    '## 期間のできごと', sections.diary.trim(), '',
+    '## タスクの取り組み', sections.task.trim(), '',
+    '次にやること:', nextList,
+  ].join('\n');
 
   _running = true;
   llmSaveBtn.disabled = true;
@@ -1052,16 +1254,33 @@ async function runLLM() {
   llmBackendNote.textContent = '';
   let backendUsed = null;
   let text = '';
-  const onToken = t => { text = t; llmOut.textContent = t; };
+
+  // 1つのバックエンドで全セクションを順に生成する
+  const runAll = (backendFn) => async () => {
+    // 日記が複数のまとまりに分かれている場合は、順に生成してつなげる
+    const done = [];
+    for (let i = 0; i < jobs.length; i++) {
+      const job = jobs[i];
+      if (jobs.length > 1) llmStatus.textContent = `生成中… (${i + 1}/${jobs.length})`;
+      const r = await backendFn({ system: job.system, user: job.user }, t => {
+        sections.diary = [...done, stripThink(t)].join('\n\n'); llmOut.textContent = compose();
+      });
+      const clean = stripThink(r || '').trim();
+      if (!clean) throw new Error('「期間のできごと」の生成が空でした');
+      done.push(clean);
+      sections.diary = done.join('\n\n');
+    }
+    return compose();
+  };
 
   // 高品質モード: Puter 優先
   const order = useExternalChk.checked
-    ? [['puter',   () => tryPuter(prompts, onToken)],
-       ['builtin', () => tryBuiltinAI(prompts, onToken)],
-       ['webllm',  () => tryWebLLM(prompts, onToken)]]
-    : [['builtin', () => tryBuiltinAI(prompts, onToken)],
-       ['webllm',  () => tryWebLLM(prompts, onToken)],
-       ['puter',   () => tryPuter(prompts, onToken)]];
+    ? [['puter',   runAll(tryPuter)],
+       ['builtin', runAll(tryBuiltinAI)],
+       ['webllm',  runAll(tryWebLLM)]]
+    : [['builtin', runAll(tryBuiltinAI)],
+       ['webllm',  runAll(tryWebLLM)],
+       ['puter',   runAll(tryPuter)]];
 
   const errors = [];
   try {
@@ -1069,8 +1288,8 @@ async function runLLM() {
       // 外部送信を含む Puter はトグルOFFの時はフォールバックとしても使わない
       if (name === 'puter' && !useExternalChk.checked) continue;
       try {
-        const r = await fn();
-        if (r && r.trim()) { backendUsed = name; text = r; break; }
+        const r = jobs.length ? await fn() : compose();
+        if (r && r.trim()) { backendUsed = jobs.length ? name : 'none'; text = r; llmOut.textContent = r; break; }
       } catch (e) {
         errors.push(`${name}: ${e.message}`);
         console.warn(`backend ${name} failed:`, e);
