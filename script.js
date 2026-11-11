@@ -755,23 +755,57 @@ function collectUpcoming(to, days = UPCOMING_DAYS) {
  *      次にやること:     … LLM を使わず、未完了/予定済み ToDo を JS で列挙(作り話の余地をなくす)
  * データが無いセクションは LLM を呼ばずに「記録なし」とする。
  */
-const GROUNDING_RULES = [
-  '# 最重要ルール: 想像で書かない',
-  '- <data> に書かれている事実だけを使う。書かれていない出来事・人物・場所・感情・理由・予定を足さない。',
-  '- 推測・解釈・励まし・一般的なアドバイスは書かない。「〜だろう」「〜と思われる」「〜しそう」も使わない。',
-  '- 出力は必ず日本語の文章。見出し・箇条書き・日付の一覧は書かない。',
+/* 期間のできごと は2段階で作る。
+ *   1) 抜き出し: 日記の区切りごとに「したこと」を短い行で抜き出す(日付なし・決まり文句なし)
+ *   2) 振り返り: 抜き出した一覧だけを渡し、似た活動をまとめて期間を通した振り返り文にする
+ * 1回で「漏れなく・正確に」と「まとめる」を同時に求めると、小型モデルは書き写すか作り話をする。
+ * 以前のプロンプトは「すべての日に1文ずつ」と指示し、日付見出し付きで渡していたため、日ごとの羅列になっていた。
+ */
+const DIARY_EXTRACT_PROMPT = [
+  'あなたは日記から事実を抜き出す係です。',
+  '<data> の日記から、書いた人がしたこと・起きた出来事を抜き出してください。',
+  '',
+  '# 出力の形',
+  '- 1行に1つ、「- 」で始めて、20字程度の短い言い方で書く(例の形: 「- 〇〇で△△をした」)。',
+  '- 日付・曜日は書かない。',
+  '- 人名・場所・作品名・数字は日記に書かれたとおりに残す。',
+  '- 夕飯・就寝・「落ち着いた一日だった」など、毎日のように繰り返す決まった内容は抜き出さない。',
+  '- 日記に書かれていないことは書かない。感想や説明も付けない。',
+  '- 抜き出した行以外は何も出力しない。',
 ].join('\n');
 
-const DIARY_SYSTEM_PROMPT = [
-  'あなたは利用者の日記を読み、ある期間に何があったかを日本語でまとめる書き手です。',
-  '<data> には期間内の日記が日付順に入っています。',
-  '期間全体の流れが分かるように、出来事を時系列の文章にまとめてください。',
-  '<data> にあるすべての日について、その日の主な出来事に1文ずつ触れてください。日を飛ばさないでください。',
-  '日記に書かれた具体的な出来事(何をしたか・どこへ行ったか・誰と会ったか)を含めてください。',
-  '「早めに寝た」「落ち着いた一日だった」のような毎日の決まった文句は省いてかまいません。',
-  'ある日の出来事を別の日のこととして書かないでください。日付を書く場合は <data> の日付どおりに書いてください。',
+/* 分類: 抜き出した各行を決まったテーマに振り分ける(選ぶだけなので小型モデルでも安定する) */
+const DIARY_THEMES = ['勉強・卒論', '就職活動', 'アルバイト・仕事', '家族・友人', '健康・運動', '趣味・買い物・生活', 'その他'];
+const DIARY_CLASSIFY_PROMPT = [
+  'あなたは出来事をテーマに分類する係です。',
+  '<data> の各行(番号付き)を、次のテーマのどれか1つに分類してください。',
+  'テーマ: ' + DIARY_THEMES.join(' / '),
   '',
-  GROUNDING_RULES,
+  '# 出力の形',
+  '- 1行に1つ、「番号: テーマ」の形で書く(例の形: 「3: 健康・運動」)。',
+  '- テーマは上の一覧の表記どおりに書く。',
+  '- すべての番号について書く。それ以外は何も出力しない。',
+].join('\n');
+
+/* 振り返り: テーマ1つにつき1回呼び、そのテーマのメモだけを1文にまとめさせる。
+ * 全テーマを一度に渡すと、2B モデルは1文に詰め込んだり、日付・評価・作り話(「入院」等)を足したりした。 */
+const DIARY_REFLECT_PROMPT = [
+  'あなたは、同じテーマの出来事メモを、日本語の1文にまとめる係です。',
+  '',
+  '# 書き方',
+  '- <data> のメモを、指定された文数(1文は70字以内)にまとめる。',
+  '- メモを全部並べるのではなく、似たものはまとめて言い換える。',
+  '- メモの前半だけでなく後半も見て、提出・発表・参加・指摘・手伝いなど、その期間ならではの出来事を優先して入れる。',
+  '  (例の考え方: 「計画書を提出」「先生から指摘」「中間発表」 → 「卒論は計画書の提出や中間発表を進め、先生から指摘も受けた。」)',
+  '- 具体的な名前(人・場所・作品など)があれば1〜2個残す。',
+  '- 「〜した。」「〜もあった。」のような、ふりかえる文体(常体)で書く。「です・ます」は使わない。',
+  '- 出力はその文だけ。前置き・見出し・箇条書きは書かない。日本語だけで書く。',
+  '',
+  '# 想像で書かない(最重要)',
+  '- メモにない出来事・人物・場所・感情・理由を足さない。',
+  '- 日付・曜日・頻度(「毎日」「週末」など)を書かない。',
+  '- 出来事の結果や効果を足さない。(悪い例: 「絆を深めた」「体調を回復させた」「方向性が明確になった」)',
+  '- 出来事を評価・意味づけしない。(悪い例: 「充実」「成長」「楽しかった」)',
 ].join('\n');
 
 const fmtMin = sec => {
@@ -795,17 +829,69 @@ function chunkDiaryRows(rows, maxChars = DIARY_CHUNK_CHARS) {
   return chunks;
 }
 
-function buildDiaryUser(rows) {
-  const diaryRows = rows.filter(r => r.diary.trim());
-  const from = diaryRows[0].date, to = diaryRows[diaryRows.length - 1].date;
-  // 1日分が極端に長い場合も入力上限を超えないよう切り詰める
-  const body = diaryRows.map(r => `${fmtJP(r.date)}\n${r.diary.trim().slice(0, 2500)}`).join('\n\n');
+/* 抜き出し用: 日付見出しは付けない(付けるとモデルが日付ごとの構造を真似る) */
+function buildExtractUser(rows) {
+  const body = rows.filter(r => r.diary.trim())
+    // 1日分が極端に長い場合も入力上限を超えないよう切り詰める
+    .map(r => r.diary.trim().slice(0, 2500)).join('\n---\n');
+  return ['次の <data> の日記から、したこと・出来事を抜き出してください。', '', '<data>', body, '</data>'].join('\n');
+}
+
+/* 抜き出し結果を行の配列に(「- 」「・」付きの行を優先) */
+function parseExtracted(text) {
+  const lines = stripThink(text).split('\n').map(s => s.trim()).filter(Boolean);
+  const bullets = lines.filter(s => /^[-・*•]/.test(s)).map(s => s.replace(/^[-・*•]\s*/, ''));
+  return (bullets.length ? bullets : lines).filter(s => s.length <= 80);
+}
+
+function buildClassifyUser(items) {
+  return ['次の <data> の各行を分類してください。', '', '<data>',
+    items.map((s, i) => `${i + 1}. ${s}`).join('\n'), '</data>'].join('\n');
+}
+
+/* 「番号: テーマ」を解釈して、テーマごとの配列にする(読めない行は「その他」) */
+function groupByTheme(items, classifyText) {
+  const themeOf = new Array(items.length).fill('その他');
+  stripThink(classifyText || '').split('\n').forEach(line => {
+    const m = line.match(/(\d+)\s*[:：.．、]\s*(.+)/);
+    if (!m) return;
+    const idx = Number(m[1]) - 1;
+    const th = DIARY_THEMES.find(t => m[2].includes(t)) ||
+               DIARY_THEMES.find(t => t.split('・').some(w => m[2].includes(w)));
+    if (idx >= 0 && idx < items.length && th) themeOf[idx] = th;
+  });
+  const groups = DIARY_THEMES.map(t => ({ theme: t, items: items.filter((_, i) => themeOf[i] === t) }))
+    .filter(g => g.items.length);
+  // 件数の多い順(「その他」は最後)
+  return groups.sort((a, b) => (a.theme === 'その他') - (b.theme === 'その他') || b.items.length - a.items.length);
+}
+
+/* 冒頭の1文は件数から JS で作る(中心だった取り組みを LLM に推測させない) */
+function buildLeadSentence(groups) {
+  const main = groups.filter(g => g.theme !== 'その他');
+  if (!main.length) return '';
+  const top = main.length >= 2 && main[1].items.length >= Math.max(2, main[0].items.length / 2)
+    ? `${main[0].theme}と${main[1].theme}` : main[0].theme;
+  return `この期間は${top}に関することが中心だった。`;
+}
+
+/* メモが多いテーマは2文まで(1文に詰めると前半しか拾われなかったため) */
+const sentenceCount = group => group.items.length >= 5 ? 2 : 1;
+
+function buildReflectUser(group) {
   return [
-    `次の <data> は ${from} から ${to} までの日記です。`,
-    'この日記に書かれていることだけを使って、期間に何があったかを文章でまとめてください。',
-    '',
-    '<data>', body, '</data>',
+    `テーマ: ${group.theme}`,
+    `次の <data> のメモを${sentenceCount(group)}文にまとめてください。`,
+    '', '<data>', group.items.map(s => '- ' + s).join('\n'), '</data>',
   ].join('\n');
+}
+
+/* 先頭から n 文だけ取り出す(余計な改行や箇条書き記号、それ以降の文を落とす) */
+function firstSentences(text, n = 1) {
+  const t = stripThink(text || '').replace(/^[-・*•\s]+/gm, '').replace(/\s*\n+\s*/g, '').trim();
+  const parts = t.match(/[^。]*。/g) || [];
+  if (parts.length) return parts.slice(0, n).join('');
+  return t ? t + '。' : '';
 }
 
 /* 完了タスクとタイマー記録を集計(数字は LLM に計算させない) */
@@ -1089,7 +1175,7 @@ async function createWebLLMEngine() {
   }
 }
 
-async function runWebLLMChat(engine, { system, user }, onToken) {
+async function runWebLLMChat(engine, { system, user, maxTokens }, onToken) {
   let text = '';
   const stream = await engine.chat.completions.create({
     messages: [
@@ -1102,7 +1188,7 @@ async function runWebLLMChat(engine, { system, user }, onToken) {
     temperature: 0.1,
     top_p: 0.8,
     repetition_penalty: 1.1,
-    max_tokens: 800,
+    max_tokens: maxTokens || 800,
   });
   for await (const chunk of stream) {
     const delta = chunk.choices?.[0]?.delta?.content || '';
@@ -1119,7 +1205,7 @@ function stripThink(t) {
 // engine / WebGPU デバイスが無効化されたときのエラー("Object has already been disposed" 等)
 const WEBLLM_DISPOSED_RE = /disposed|destroyed|detached|lost|invalid state|has already been/i;
 
-async function tryWebLLM({ system, user }, onToken) {
+async function tryWebLLM({ system, user, maxTokens }, onToken) {
   llmBackendNote.textContent = _webllmEngine
     ? `バックエンド: WebLLM (${WEBLLM_MODEL_ID})`
     : 'バックエンド: WebLLM (ブラウザ内モデル)';
@@ -1143,7 +1229,7 @@ async function tryWebLLM({ system, user }, onToken) {
         _webllmEngine = await createWebLLMEngine();
       }
       llmStatus.textContent = attempt === 1 ? '生成中…(WebLLM)' : '生成中…(WebLLM 再試行)';
-      return await runWebLLMChat(_webllmEngine, { system, user }, onToken);
+      return await runWebLLMChat(_webllmEngine, { system, user, maxTokens }, onToken);
     } catch (e) {
       const msg = String(e && e.message || e);
       console.warn(`WebLLM attempt ${attempt} failed:`, e);
@@ -1236,7 +1322,7 @@ async function runLLM() {
   const jobs = [];
   if (hasDiary) {
     chunkDiaryRows(rows).forEach(chunk =>
-      jobs.push({ key: 'diary', system: DIARY_SYSTEM_PROMPT, user: buildDiaryUser(chunk) }));
+      jobs.push({ key: 'extract', system: DIARY_EXTRACT_PROMPT, user: buildExtractUser(chunk) }));
   }
   const nextList = buildNextList(rows, to);
 
@@ -1257,19 +1343,39 @@ async function runLLM() {
 
   // 1つのバックエンドで全セクションを順に生成する
   const runAll = (backendFn) => async () => {
-    // 日記が複数のまとまりに分かれている場合は、順に生成してつなげる
-    const done = [];
+    // 1) 抜き出し(区切りごと)。途中経過は「読み込み中」とだけ表示する
+    const items = [];
     for (let i = 0; i < jobs.length; i++) {
       const job = jobs[i];
-      if (jobs.length > 1) llmStatus.textContent = `生成中… (${i + 1}/${jobs.length})`;
-      const r = await backendFn({ system: job.system, user: job.user }, t => {
-        sections.diary = [...done, stripThink(t)].join('\n\n'); llmOut.textContent = compose();
-      });
-      const clean = stripThink(r || '').trim();
-      if (!clean) throw new Error('「期間のできごと」の生成が空でした');
-      done.push(clean);
-      sections.diary = done.join('\n\n');
+      sections.diary = `（日記を読み込んでいます… ${i + 1}/${jobs.length}）`;
+      llmOut.textContent = compose();
+      const r = await backendFn({ system: job.system, user: job.user }, () => {});
+      items.push(...parseExtracted(r || ''));
     }
+    if (!items.length) throw new Error('日記から出来事を抜き出せませんでした');
+    // 2) 振り返り(全体で1回)。一覧が長すぎる場合は、期間の後半が欠けないよう等間隔に間引く
+    const totalLen = items.reduce((n, s) => n + s.length + 3, 0);
+    const keep = totalLen > 1800 ? Math.max(1, Math.floor(items.length * 1800 / totalLen)) : items.length;
+    const list = keep >= items.length ? items
+      : Array.from({ length: keep }, (_, k) => items[Math.floor(k * items.length / keep)]);
+    // 3) テーマ分類 → JS でまとめる
+    sections.diary = '（出来事をテーマごとに整理しています…）';
+    llmOut.textContent = compose();
+    const cls = await backendFn({ system: DIARY_CLASSIFY_PROMPT, user: buildClassifyUser(list), maxTokens: 400 }, () => {});
+    const groups = groupByTheme(list, cls);
+    const lead = buildLeadSentence(groups);
+    // 4) テーマごとに1回ずつ、1文にまとめさせてつなげる
+    const sentences = [];
+    for (const g of groups) {
+      const n = sentenceCount(g);
+      const r = await backendFn({ system: DIARY_REFLECT_PROMPT, user: buildReflectUser(g), maxTokens: 150 * n }, t => {
+        sections.diary = lead + [...sentences, firstSentences(t, n)].join(''); llmOut.textContent = compose();
+      });
+      const s = firstSentences(r, n);
+      if (s) sentences.push(s);
+    }
+    if (!sentences.length) throw new Error('「期間のできごと」の生成が空でした');
+    sections.diary = lead + sentences.join('');
     return compose();
   };
 
