@@ -550,7 +550,7 @@ function checkTimerNotification() {
  * 戦略:
  *   1) window.ai (Chrome/Edge Prompt API, LanguageModel) が利用可能ならそれで生成
  *   2) 使えなければ WebLLM (@mlc-ai/web-llm) を CDN から動的 import してブラウザ内で実行
- *      - 既定モデル: Llama-3.2-1B-Instruct-q4f16_1 (約0.9GB、IndexedDB キャッシュ)
+ *      - 既定モデル: Qwen2.5-1.5B-Instruct-q4f16_1 (約1GB、ブラウザにキャッシュ)。日本語のため Llama-3.2-1B から変更
  *   3) どちらも不可なら対応外メッセージ
  * ユーザーは期間を選んでボタンを押すだけ。URL/APIキー/モデル指定は不要。
  */
@@ -825,7 +825,21 @@ async function tryBuiltinAI({ system, user }, onToken) {
 /* ---------- バックエンド: WebLLM (CDN 動的 import) ---------- */
 let _webllmEngine = null;
 let _webllmMod = null;
-const WEBLLM_MODEL_ID = 'Llama-3.2-1B-Instruct-q4f16_1-MLC';
+// Llama-3.2-1B は日本語がほぼ書けず意味不明な文になったため、日本語に強い Qwen2.5 を優先する。
+// 上から順に、WebLLM の prebuiltAppConfig に存在する最初のモデルを使う。
+const WEBLLM_MODEL_CANDIDATES = [
+  'Qwen2.5-1.5B-Instruct-q4f16_1-MLC',
+  'Qwen2-1.5B-Instruct-q4f16_1-MLC',
+  'Llama-3.2-1B-Instruct-q4f16_1-MLC',
+];
+let WEBLLM_MODEL_ID = WEBLLM_MODEL_CANDIDATES[0];
+
+function pickWebLLMModel(mod) {
+  const list = mod && mod.prebuiltAppConfig && mod.prebuiltAppConfig.model_list;
+  if (!Array.isArray(list)) return WEBLLM_MODEL_CANDIDATES[0];
+  const ids = new Set(list.map(m => m.model_id));
+  return WEBLLM_MODEL_CANDIDATES.find(id => ids.has(id)) || WEBLLM_MODEL_CANDIDATES[0];
+}
 
 async function loadWebLLMLib() {
   if (_webllmMod) return _webllmMod;
@@ -850,6 +864,8 @@ async function createWebLLMEngine() {
   llmProgress.hidden = false;
   llmProgressFill.style.width = '0%';
   llmProgressText.textContent = 'WebLLM 初期化中…';
+  WEBLLM_MODEL_ID = pickWebLLMModel(mod);
+  llmBackendNote.textContent = `バックエンド: WebLLM (${WEBLLM_MODEL_ID})`;
   try {
     return await mod.CreateMLCEngine(WEBLLM_MODEL_ID, {
       initProgressCallback: (report) => {
@@ -875,7 +891,10 @@ async function runWebLLMChat(engine, { system, user }, onToken) {
       { role: 'user',   content: user },
     ],
     stream: true,
-    temperature: 0.7,
+    // 小型モデルは高温だと崩れ・同じ文の繰り返しが出やすいので低めにする
+    temperature: 0.3,
+    top_p: 0.9,
+    repetition_penalty: 1.1,
     max_tokens: 800,
   });
   for await (const chunk of stream) {
