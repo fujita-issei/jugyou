@@ -141,3 +141,223 @@ main { padding: 24px; max-width: 1000px; margin: 0 auto; }
   font-size: 8px;
   color: #2e7d32;
 }
+
+/* ================================================================
+ * 追加分: ToDo / タイマー / LLM要約
+ * 既存の .box / .link-btn / .diary-* の見た目を維持したまま拡張
+ * ================================================================ */
+
+/* ヘッダーに選択中日付のバッジ */
+.date-badge {
+  margin-left: auto;
+  padding: 4px 10px;
+  background: #e8efff;
+  color: #1a56db;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+/* view-title 内の日付ナビ */
+.view-title { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.date-nav {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: normal;
+  font-size: 14px;
+}
+.date-nav #date-label { min-width: 170px; text-align: center; font-weight: bold; }
+
+/* link-btn の小さいバリエーション */
+.link-btn.sm { margin-top: 0; padding: 4px 10px; font-size: 13px; }
+.link-btn.primary { background: #1a56db; color: #fff; }
+.link-btn.primary:hover { background: #164bbb; }
+.link-btn.danger  { border-color: #c62828; color: #c62828; }
+.link-btn.danger:hover { background: #fdecea; }
+.link-btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+/* 小さなヒント文 */
+.hint { font-size: 12px; color: #888; line-height: 1.6; margin-top: 6px; }
+
+/* box-label の別色(ログ用) */
+.box-label.alt { background: #f0f4ea; color: #43603b; }
+
+/* ToDoフォーム */
+.todo-form { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+.todo-form input[type=text] {
+  flex: 1 1 180px;
+  padding: 8px;
+  border: 1px solid #ccd1db;
+  border-radius: 6px;
+  font: inherit;
+}
+.todo-form input[type=number] {
+  width: 90px;
+  padding: 8px;
+  border: 1px solid #ccd1db;
+  border-radius: 6px;
+  font: inherit;
+}
+
+/* ToDoリスト */
+.todo-list { list-style: none; padding: 0; margin: 0; }
+.todo-item {
+  border: 1px solid #e3e6ec;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 8px;
+  background: #fafbfc;
+}
+.todo-item.done { background: #f4f6f1; opacity: 0.85; }
+.todo-item.running { border-color: #1a56db; box-shadow: 0 0 0 2px #e8efff; }
+.todo-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.todo-text { flex: 1; min-width: 160px; font-weight: 500; }
+.todo-item.done .todo-text { text-decoration: line-through; color: #888; }
+.todo-plan { font-size: 12px; color: #666; }
+.todo-elapsed {
+  font-variant-numeric: tabular-nums;
+  font-weight: bold;
+  color: #1a56db;
+  min-width: 70px;
+  text-align: right;
+}
+.todo-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+.todo-actions button {
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid #c7cdd8;
+  background: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+}
+.todo-actions button:hover { background: #eef1f6; }
+.todo-actions button.start  { color: #1a56db; border-color: #1a56db; }
+.todo-actions button.stop   { color: #c62828; border-color: #c62828; }
+.todo-actions button.finish { color: #2e7d32; border-color: #2e7d32; }
+.todo-actions button.del    { color: #888; }
+
+.todo-diff { font-size: 12px; margin-top: 4px; }
+.todo-diff.pos { color: #c62828; }    /* 超過 */
+.todo-diff.neg { color: #2e7d32; }    /* 短縮 */
+
+.todo-note {
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px;
+  border: 1px solid #ccd1db;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  min-height: 44px;
+  resize: vertical;
+}
+
+/* ログセクション */
+.log-section { margin-top: 20px; padding-top: 12px; border-top: 1px dashed #ccd1db; }
+.todo-log { list-style: none; padding: 0; margin: 0; }
+.todo-log li {
+  padding: 8px 0;
+  border-bottom: 1px solid #eef0f4;
+  font-size: 13px;
+}
+.todo-log li:last-child { border-bottom: none; }
+.log-title { font-weight: bold; }
+.log-meta  { color: #666; font-size: 12px; }
+.log-note  { color: #333; margin-top: 2px; white-space: pre-wrap; }
+
+/* タイマータブ: 大画面表示 */
+.active-timer { display: flex; flex-direction: column; gap: 10px; }
+.active-timer .big-time {
+  font-size: 56px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: #1a56db;
+}
+.active-timer .big-text { text-align: center; font-weight: bold; margin-top: -8px; }
+.active-timer .big-plan { text-align: center; color: #666; font-size: 13px; }
+.active-timer .big-plan.over { color: #c62828; }
+.active-timer .btn-row { display: flex; gap: 8px; justify-content: center; margin-top: 12px; }
+.notify-row { margin-top: 16px; display: flex; gap: 10px; align-items: center; }
+.diary-status.err { color: #c62828; }
+
+/* LLM要約タブ */
+.field { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 13px; }
+.field span { width: 90px; color: #555; }
+.field input {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid #ccd1db;
+  border-radius: 6px;
+  font: inherit;
+}
+.llm-actions { display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
+.llm-actions .link-btn { margin-top: 0; }
+.llm-output {
+  background: #0f1420;
+  color: #e6edf3;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  min-height: 180px;
+  max-height: 420px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: auto;
+  margin: 0 0 8px;
+}
+
+/* 外部LLM切替トグル */
+.toggle-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px;
+  margin: 8px 0;
+  background: #f7f9fc;
+  border: 1px solid #e3e6ec;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.toggle-row input { margin-top: 3px; }
+.toggle-row a { color: #1a56db; }
+
+/* 進捗バー (WebLLM 初回ダウンロード等) */
+.llm-progress { margin: 8px 0; }
+.llm-progress .bar {
+  height: 8px;
+  background: #e3e6ec;
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.llm-progress .fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #1a56db, #4a7ffe);
+  transition: width 0.3s;
+}
+
+/* カレンダーのマーク(複数種類) */
+.cal-day { display: flex; align-items: flex-start; justify-content: flex-end; padding: 4px 6px; }
+.cal-day.selected { outline: 2px solid #1a56db; outline-offset: -2px; }
+.cal-day .marks {
+  position: absolute;
+  left: 4px;
+  bottom: 3px;
+  display: flex;
+  gap: 2px;
+}
+.cal-day .marks i { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+.legend { display: flex; gap: 12px; margin-top: 10px; font-size: 12px; color: #666; flex-wrap: wrap; }
+.legend .dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  margin-right: 4px; vertical-align: middle;
+}
+.dot.green { background: #2e7d32; }
+.dot.blue  { background: #1a56db; }
+.dot.gray  { background: #999; }
