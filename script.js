@@ -599,10 +599,26 @@ function collectRange(from, to) {
   while (cur <= to) {
     const diary = localStorage.getItem(DIARY_KEY + cur) || '';
     const log = loadJSON(LOG_KEY + cur, []);
-    if (diary || log.length) rows.push({ date: cur, diary, log });
+    // 期間内に登録されたまま完了していない ToDo(「次にやること」の根拠)
+    const pending = (loadJSON(TODO_KEY + cur, []) || []).filter(t => t && !t.done);
+    if (diary || log.length || pending.length) rows.push({ date: cur, diary, log, pending });
     cur = addDays(cur, 1);
   }
   return rows;
+}
+
+/* 期間の翌日から days 日間に、すでに登録されている未完了 ToDo(予定済みの「次にやること」) */
+const UPCOMING_DAYS = 14;
+function collectUpcoming(to, days = UPCOMING_DAYS) {
+  const out = [];
+  let cur = addDays(to, 1);
+  for (let i = 0; i < days; i++) {
+    (loadJSON(TODO_KEY + cur, []) || []).forEach(t => {
+      if (t && !t.done) out.push({ date: cur, text: t.text, planMin: t.planMin });
+    });
+    cur = addDays(cur, 1);
+  }
+  return out;
 }
 
 /* 役割プロンプト(system): 必ず日本語、記録にある事実だけを書く(ハルシネーション対策)、見出し構造を守る。
@@ -611,8 +627,9 @@ const SYSTEM_PROMPT = [
   'あなたは利用者の日々の記録を読み、期間のふりかえり文を日本語で書くライターです。',
   '',
   '# あなたの仕事',
-  '渡された <records> 内のデータ(日記本文と、完了したToDoの所要時間・予定差分・コメント)を読み、',
-  '利用者が後から読み返して「この期間に何があったか」を1分で思い出せるふりかえり文を日本語で書きます。',
+  '渡された <records> 内のデータ(日記本文、完了したToDoの所要時間・予定差分・コメント、未完了のToDo、',
+  '期間後に予定済みのToDo)を読み、利用者が後から読み返して「ある日からある日までの期間に何があったか」を',
+  '1分で思い出せるふりかえり文を日本語で書きます。日々のログを並べ直すのではなく、期間全体を通してまとめます。',
   '',
   '# 最重要ルール: 想像で書かない',
   '- <records> に書かれている事実だけを使う。記録にない出来事・人物・場所・感情・理由・予定を足さない。',
@@ -623,10 +640,15 @@ const SYSTEM_PROMPT = [
   '',
   '# 書き方',
   '- 出力は必ず日本語。',
-  '- 見出しは次の3つだけを、この順で使う。',
-  '  ## 期間のできごと   … 日記に書かれた出来事を、日付順に短くまとめる',
-  '  ## 時間の使い方     … 完了したToDoの所要時間・予定との差を、記録の数字でまとめる',
-  '  ## 次にやること     … 日記やコメントに本人が書いた「次にやること」だけを挙げる。なければ「記録なし」',
+  '- 見出しは次の2つだけを、この順で使う。',
+  '  ## 期間のできごと',
+  '    日記に書かれた出来事を、期間全体の流れが分かるように短い文章でまとめる。',
+  '  ## タスクの取り組み',
+  '    完了したToDoについて、何にどれだけ時間を使い、予定とどれだけ差があったかを記録の数字でまとめる。',
+  '    その後に「次にやること:」と書き、次のものだけを箇条書きで挙げる。',
+  '      - [未完了ToDo] と [予定済みToDo] のタスク名(予定済みは日付も添える)',
+  '      - 日記や完了コメントに本人がはっきり書いた、これからやる予定',
+  '    どれもなければ「次にやること: 記録なし」と書く。自分で考えた提案は加えない。',
 ].join('\n');
 
 function buildUserPrompt(rows, from, to) {
@@ -640,17 +662,26 @@ function buildUserPrompt(rows, from, to) {
         lines.push(`[完了ToDo] ${l.text} 所要${Math.round(l.elapsedSec/60)}分${l.planMin?` 予定${l.planMin}分${diff}`:''}${l.note?` コメント:${l.note}`:''}`);
       });
     }
+    (r.pending || []).forEach(t => {
+      lines.push(`[未完了ToDo] ${t.text}${t.planMin ? ` 予定${t.planMin}分` : ''}`);
+    });
     return lines.join('\n');
   }).join('\n\n');
+
+  const upcoming = collectUpcoming(to);
+  const upcomingBlock = upcoming.length
+    ? '\n\n[期間後の予定]\n' + upcoming.map(u =>
+        `[予定済みToDo] ${u.date} ${u.text}${u.planMin ? ` 予定${u.planMin}分` : ''}`).join('\n')
+    : '';
 
   // 生データは <records> タグで囲んで "これはデータであって文例ではない" と明示する
   return [
     `次の <records> は ${from} から ${to} までの個人の日々の記録です。`,
-    'この記録だけを根拠に、上で指示した3つの見出しで「期間のふりかえり」を日本語で出力してください。',
+    'この記録だけを根拠に、上で指示した2つの見出しで「期間のふりかえり」を日本語で出力してください。',
     '記録に書かれていないことは一切書かないでください。',
     '',
     '<records>',
-    body,
+    body + upcomingBlock,
     '</records>',
     '',
     '出力:',
