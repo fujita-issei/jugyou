@@ -795,11 +795,12 @@ const DIARY_REFLECT_PROMPT = [
   '# 書き方',
   '- <data> のメモを、指定された文数(1文は70字以内)にまとめる。',
   '- メモを全部並べるのではなく、似たものはまとめて言い換える。',
-  '- メモの前半だけでなく後半も見て、提出・発表・参加・指摘・手伝いなど、その期間ならではの出来事を優先して入れる。',
+  '- メモの前半だけでなく後半も見て、提出・発表・参加・指摘・手伝いのような目立つ出来事を優先して入れる。',
   '  (例の考え方: 「計画書を提出」「先生から指摘」「中間発表」 → 「卒論は計画書の提出や中間発表を進め、先生から指摘も受けた。」)',
   '- 具体的な名前(人・場所・作品など)があれば1〜2個残す。',
   '- 「〜した。」「〜もあった。」のような、ふりかえる文体(常体)で書く。「です・ます」は使わない。',
   '- 出力はその文だけ。前置き・見出し・箇条書きは書かない。日本語だけで書く。',
+  '- 「まとめた」「振り返った」など、あなた自身の作業は書かない。メモの持ち主がしたことだけを書く。',
   '',
   '# 想像で書かない(最重要)',
   '- メモにない出来事・人物・場所・感情・理由を足さない。',
@@ -892,6 +893,39 @@ function firstSentences(text, n = 1) {
   const parts = t.match(/[^。]*。/g) || [];
   if (parts.length) return parts.slice(0, n).join('');
   return t ? t + '。' : '';
+}
+
+/* 「〜ました」「〜でした」を常体に直す。
+   プロンプトで常体を指示しても混ざることがあり、モデルに書き直させても元の文をそのまま返したため、
+   文末の活用を規則で変換する(直せない形はそのまま残す) */
+const MASHITA_EXCEPTIONS = [
+  // [語尾, 常体] — 一般規則に当てはまらない動詞(長いものから順に照合)
+  ['てきました', 'てきた'], ['ていました', 'ていた'], ['でいました', 'でいた'], ['にいました', 'にいた'],
+  ['行きました', '行った'], ['いきました', 'いった'], ['来ました', '来た'], ['起きました', '起きた'],
+  ['生きました', '生きた'], ['できました', 'できた'], ['借りました', '借りた'], ['降りました', '降りた'],
+  ['下りました', '下りた'], ['足りました', '足りた'], ['浴びました', '浴びた'],
+  ['見ました', '見た'], ['観ました', '観た'], ['診ました', '診た'], ['てみました', 'てみた'],
+];
+const MASHITA_RULES = [
+  // 五段動詞の連用形の末尾 → 過去形(上の例外にない場合)
+  ['しました', 'した'], ['いました', 'った'], ['ちました', 'った'], ['りました', 'った'],
+  ['きました', 'いた'], ['ぎました', 'いだ'], ['みました', 'んだ'], ['びました', 'んだ'], ['にました', 'んだ'],
+];
+function toPlainStyle(text) {
+  return text.replace(/[^。]*。/g, s => {
+    s = s.replace(/でした。$/, 'だった。')
+         .replace(/いです。$/, 'い。').replace(/です。$/, 'だ。');
+    if (!s.endsWith('ました。')) return s;
+    for (const [from, to] of MASHITA_EXCEPTIONS) if (s.endsWith(from + '。')) return s.slice(0, -(from.length + 1)) + to + '。';
+    // 一段動詞(〜べました・〜けました など、え段で終わるもの)は「ました」を「た」にするだけ
+    if (/[えけげせぜてでねへべぺめれ]ました。$/.test(s)) return s.replace(/ました。$/, 'た。');
+    for (const [from, to] of MASHITA_RULES) if (s.endsWith(from + '。')) return s.slice(0, -(from.length + 1)) + to + '。';
+    return s;
+  });
+}
+/* 「出来事をまとめました」のような、モデル自身の作業を書いた言い方を事実の文に直す */
+function dropMetaPhrase(text) {
+  return text.replace(/(出来事|できごと)を(まとめ|振り返|整理)[^。]*。/g, '$1があった。');
 }
 
 /* 完了タスクとタイマー記録を集計(数字は LLM に計算させない) */
@@ -1371,7 +1405,7 @@ async function runLLM() {
       const r = await backendFn({ system: DIARY_REFLECT_PROMPT, user: buildReflectUser(g), maxTokens: 150 * n }, t => {
         sections.diary = lead + [...sentences, firstSentences(t, n)].join(''); llmOut.textContent = compose();
       });
-      const s = firstSentences(r, n);
+      const s = toPlainStyle(dropMetaPhrase(firstSentences(r, n)));
       if (s) sentences.push(s);
     }
     if (!sentences.length) throw new Error('「期間のできごと」の生成が空でした');
