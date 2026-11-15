@@ -26,7 +26,6 @@ function loadDiary(date) {
   diaryDate.textContent = date;
   diaryText.value = localStorage.getItem(DIARY_KEY + date) || '';
   diaryStatus.textContent = '';
-  diaryStatus.classList.remove('err');
 }
 
 document.getElementById('diary-save').addEventListener('click', () => {
@@ -34,23 +33,17 @@ document.getElementById('diary-save').addEventListener('click', () => {
   diaryStatus.textContent = '保存しました';
 });
 
-// 自動保存 (debounce)
-let _diaryTimer = null;
-diaryText.addEventListener('input', () => {
-  clearTimeout(_diaryTimer);
-  _diaryTimer = setTimeout(() => {
-    localStorage.setItem(DIARY_KEY + currentDate, diaryText.value);
-    diaryStatus.textContent = '自動保存しました';
-    renderCalendar();
-  }, 400);
-});
-
 loadDiary(currentDate);
 
-// 現在時刻（カレンダータブ内のダミー表示）
+// 現在時刻（秒単位の日付・時刻を表示のみ）
+const clockDate = document.getElementById('clock-date');
 const clock = document.getElementById('clock');
 function updateClock() {
-  clock.textContent = new Date().toLocaleTimeString('ja-JP');
+  const now = new Date();
+  clockDate.textContent = now.toLocaleDateString('ja-JP', {
+    year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short',
+  });
+  clock.textContent = now.toLocaleTimeString('ja-JP', { hour12: false });
 }
 updateClock();
 setInterval(updateClock, 1000);
@@ -60,64 +53,63 @@ const calTitle = document.getElementById('cal-title');
 const calGrid = document.getElementById('cal-grid');
 const today = new Date();
 let calYear = today.getFullYear();
-let calMonth = today.getMonth();
+let calMonth = today.getMonth(); // 0〜11（0 = 1月）
 
+// 2026, 10, 5 → "2026-11-05"
 function fmtDate(y, m, d) {
   return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 
+// 画面に表示するカレンダーをつくる（calYear / calMonth を変えたらこれを呼ぶ）
 function renderCalendar() {
   calTitle.textContent = `${calYear}年${calMonth + 1}月`;
-  calGrid.innerHTML = '';
-  ['日', '月', '火', '水', '木', '金', '土'].forEach((w, i) => {
-    const h = document.createElement('div');
-    h.className = 'cal-week' + (i === 0 ? ' sun' : i === 6 ? ' sat' : '');
-    h.textContent = w;
-    calGrid.appendChild(h);
-  });
-  const first = new Date(calYear, calMonth, 1).getDay();
-  const days = new Date(calYear, calMonth + 1, 0).getDate();
-  for (let i = 0; i < first; i++) calGrid.appendChild(document.createElement('div'));
+
+  const firstWeekday = new Date(calYear, calMonth, 1).getDay();  // 1日は何曜日？（0 = 日）
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate(); // その月は何日まで？
   const todayStr = fmtDate(today.getFullYear(), today.getMonth(), today.getDate());
-  for (let d = 1; d <= days; d++) {
-    const date = fmtDate(calYear, calMonth, d);
-    const cell = document.createElement('button');
-    cell.className = 'cal-day';
-    if (date === todayStr) cell.classList.add('today');
-    if (date === currentDate) cell.classList.add('selected');
-    cell.textContent = d;
 
-    // 複数マーク (緑=日記, 青=ToDo, 灰=完了ログ)
-    const marks = document.createElement('span');
-    marks.className = 'marks';
-    if (localStorage.getItem(DIARY_KEY + date)) {
-      const i = document.createElement('i'); i.style.background = '#2e7d32'; marks.appendChild(i);
-    }
-    if ((loadJSON(TODO_KEY + date, []) || []).length) {
-      const i = document.createElement('i'); i.style.background = '#1a56db'; marks.appendChild(i);
-    }
-    if ((loadJSON(LOG_KEY + date, []) || []).length) {
-      const i = document.createElement('i'); i.style.background = '#999'; marks.appendChild(i);
-    }
-    cell.appendChild(marks);
+  // 曜日の見出し
+  let html = '<div class="cal-week sun">日</div><div class="cal-week">月</div>'
+    + '<div class="cal-week">火</div><div class="cal-week">水</div>'
+    + '<div class="cal-week">木</div><div class="cal-week">金</div>'
+    + '<div class="cal-week sat">土</div>';
 
-    cell.addEventListener('click', () => {
-      setCurrentDate(date);
-      showView('view-journal');
-    });
-    calGrid.appendChild(cell);
+  // 1日の前の空白
+  for (let i = 0; i < firstWeekday; i++) {
+    html += '<div></div>';
   }
+
+  // 1日〜月末のボタン
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = fmtDate(calYear, calMonth, d);
+    let cls = 'cal-day';
+    if (date === todayStr) cls += ' today';                          // 今日
+    if (localStorage.getItem(DIARY_KEY + date)) cls += ' has-diary'; // 日記あり
+    html += `<button class="${cls}" data-date="${date}">${d}</button>`;
+  }
+
+  calGrid.innerHTML = html;
 }
 
-function moveMonth(delta) {
-  const d = new Date(calYear, calMonth + delta, 1);
-  calYear = d.getFullYear();
-  calMonth = d.getMonth();
+// 日付ボタンのクリック（カレンダー全体でまとめて受ける）
+calGrid.addEventListener('click', (e) => {
+  const date = e.target.dataset.date; // 日付ボタン以外なら undefined
+  if (!date) return;
+  loadDiary(date);
+  showView('view-journal');
+});
+
+// 前の月 / 次の月 / 今日
+document.getElementById('cal-prev').addEventListener('click', () => {
+  calMonth--;
+  if (calMonth < 0) { calMonth = 11; calYear--; }
   renderCalendar();
-}
-
-document.getElementById('cal-prev').addEventListener('click', () => moveMonth(-1));
-document.getElementById('cal-next').addEventListener('click', () => moveMonth(1));
+});
+document.getElementById('cal-next').addEventListener('click', () => {
+  calMonth++;
+  if (calMonth > 11) { calMonth = 0; calYear++; }
+  renderCalendar();
+});
 document.getElementById('cal-today').addEventListener('click', () => {
   calYear = today.getFullYear();
   calMonth = today.getMonth();
@@ -126,6 +118,8 @@ document.getElementById('cal-today').addEventListener('click', () => {
 
 // 日記保存後にカレンダーの記録マークを更新
 document.getElementById('diary-save').addEventListener('click', renderCalendar);
+
+renderCalendar();
 
 /* ================================================================
  * 追加分: ToDo / タイマー / ToDo完了ログ / ローカルLLM要約
@@ -168,16 +162,21 @@ const setTodos = (date, arr) => saveJSON(TODO_KEY + date, arr);
 
 /* ---------- 日付ナビ (ToDo・日記タブ) ---------- */
 const dateLabel = document.getElementById('date-label');
-const dateBadge = document.getElementById('selected-date-badge');
 
-function setCurrentDate(ymd) {
-  loadDiary(ymd);                        // currentDate を切替、日記を読み込み
-  dateLabel.textContent = fmtJP(ymd);
-  dateBadge.textContent = fmtJP(ymd);
+// ToDo の表示を、日記側で選ばれている日付(currentDate)に合わせる
+function syncTodoDate() {
+  dateLabel.textContent = fmtJP(currentDate);
   renderTodos();
   renderTodoLog();
-  renderCalendar();
 }
+
+// 日付の移動は日記側の loadDiary を呼ぶだけ(日記・カレンダーのコードには手を加えない)
+function setCurrentDate(ymd) {
+  loadDiary(ymd);
+}
+
+// 日記の日付表示が変わったら(カレンダーからの移動も含めて) ToDo も同じ日付に切り替える
+new MutationObserver(syncTodoDate).observe(diaryDate, { childList: true, characterData: true, subtree: true });
 
 document.getElementById('date-prev').addEventListener('click', () => setCurrentDate(addDays(currentDate, -1)));
 document.getElementById('date-next').addEventListener('click', () => setCurrentDate(addDays(currentDate, +1)));
@@ -204,7 +203,7 @@ todoForm.addEventListener('submit', e => {
   });
   setTodos(currentDate, arr);
   todoTextEl.value = ''; todoPlanEl.value = '';
-  renderTodos(); renderCalendar();
+  renderTodos();
 });
 
 /* 選択日に関係なく全日のToDoを走査 */
@@ -344,11 +343,11 @@ function uncompleteTask(id) {
   const log = loadJSON(LOG_KEY + currentDate, []);
   const idx = log.findIndex(x => x.id === id);
   if (idx >= 0) { log.splice(idx, 1); saveJSON(LOG_KEY + currentDate, log); }
-  renderTodos(); renderTodoLog(); renderCalendar();
+  renderTodos(); renderTodoLog();
 }
 
-function finishTask(id) {
-  const arr = getTodos(currentDate);
+function finishTask(id, date = currentDate) {
+  const arr = getTodos(date);
   const t = arr.find(x => x.id === id);
   if (!t) return;
   if (t.running && t.startedAt) {
@@ -358,7 +357,7 @@ function finishTask(id) {
   t.done = true; t.finishedAt = Date.now();
   const diffSec = t.planMin ? (t.elapsedSec - t.planMin * 60) : null;
 
-  const log = loadJSON(LOG_KEY + currentDate, []);
+  const log = loadJSON(LOG_KEY + date, []);
   const entry = {
     id: t.id, text: t.text, planMin: t.planMin,
     elapsedSec: Math.round(t.elapsedSec),
@@ -368,9 +367,9 @@ function finishTask(id) {
   };
   const existing = log.findIndex(x => x.id === id);
   if (existing >= 0) log[existing] = entry; else log.push(entry);
-  saveJSON(LOG_KEY + currentDate, log);
-  setTodos(currentDate, arr);
-  renderTodos(); renderTodoLog(); renderActiveTimer(); renderCalendar();
+  saveJSON(LOG_KEY + date, log);
+  setTodos(date, arr);
+  renderTodos(); renderTodoLog(); renderActiveTimer();
 }
 
 function updateTaskNote(id, note) {
@@ -389,7 +388,7 @@ function deleteTask(id) {
   if (!confirm('このタスクを削除しますか？（完了ログは残ります）')) return;
   const arr = getTodos(currentDate).filter(x => x.id !== id);
   setTodos(currentDate, arr);
-  renderTodos(); renderActiveTimer(); renderCalendar();
+  renderTodos(); renderActiveTimer();
 }
 
 /* ---------- ToDo完了ログ ---------- */
@@ -477,14 +476,9 @@ function renderActiveTimer() {
   });
   const fin = document.createElement('button'); fin.className = 'link-btn primary'; fin.textContent = '✓ 終了';
   fin.addEventListener('click', () => {
-    const prev = currentDate;
-    currentDate = date;   // その日のタスクとして確定
-    diaryDate.textContent = currentDate;
-    finishTask(task.id);
-    currentDate = prev;
-    diaryDate.textContent = currentDate;
+    finishTask(task.id, date);   // そのタスクが登録された日付のログに記録する
     renderActiveTimer();
-    renderTodos(); renderTodoLog(); renderCalendar();
+    renderTodos(); renderTodoLog();
   });
   row.append(stop, fin);
 
@@ -1533,7 +1527,5 @@ function updateBackendHint() {
 updateBackendHint();
 
 /* ---------- 初期化 ---------- */
-setCurrentDate(currentDate);
+syncTodoDate();
 renderActiveTimer();
-
-renderCalendar();

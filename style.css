@@ -74,8 +74,14 @@ main { padding: 24px; max-width: 1000px; margin: 0 auto; }
 }
 .box-desc { font-size: 14px; line-height: 1.8; color: #666; }
 
-.clock {
+.clock-date {
   margin-top: 20px;
+  font-size: 20px;
+  text-align: center;
+  color: #666;
+}
+.clock {
+  margin-top: 8px;
   font-size: 40px;
   font-variant-numeric: tabular-nums;
   text-align: center;
@@ -147,28 +153,9 @@ main { padding: 24px; max-width: 1000px; margin: 0 auto; }
  * 既存の .box / .link-btn / .diary-* の見た目を維持したまま拡張
  * ================================================================ */
 
-/* ヘッダーに選択中日付のバッジ */
-.date-badge {
-  margin-left: auto;
-  padding: 4px 10px;
-  background: #e8efff;
-  color: #1a56db;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: bold;
-}
-
 /* view-title 内の日付ナビ */
-.view-title { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.date-nav {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: normal;
-  font-size: 14px;
-}
-.date-nav #date-label { min-width: 170px; text-align: center; font-weight: bold; }
+.date-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; font-size: 14px; }
+.date-nav #date-label { flex: 1; text-align: center; font-weight: bold; }
 
 /* link-btn の小さいバリエーション */
 .link-btn.sm { margin-top: 0; padding: 4px 10px; font-size: 13px; }
@@ -281,7 +268,7 @@ main { padding: 24px; max-width: 1000px; margin: 0 auto; }
 .active-timer .big-plan.over { color: #c62828; }
 .active-timer .btn-row { display: flex; gap: 8px; justify-content: center; margin-top: 12px; }
 .notify-row { margin-top: 16px; display: flex; gap: 10px; align-items: center; }
-.diary-status.err { color: #c62828; }
+.app-status.err { color: #c62828; }
 
 /* LLM要約タブ */
 .field { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 13px; }
@@ -342,17 +329,6 @@ main { padding: 24px; max-width: 1000px; margin: 0 auto; }
   transition: width 0.3s;
 }
 
-/* カレンダーのマーク(複数種類) */
-.cal-day { display: flex; align-items: flex-start; justify-content: flex-end; padding: 4px 6px; }
-.cal-day.selected { outline: 2px solid #1a56db; outline-offset: -2px; }
-.cal-day .marks {
-  position: absolute;
-  left: 4px;
-  bottom: 3px;
-  display: flex;
-  gap: 2px;
-}
-.cal-day .marks i { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
 .legend { display: flex; gap: 12px; margin-top: 10px; font-size: 12px; color: #666; flex-wrap: wrap; }
 .legend .dot {
   display: inline-block; width: 8px; height: 8px; border-radius: 50%;
