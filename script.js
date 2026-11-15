@@ -35,10 +35,15 @@ document.getElementById('diary-save').addEventListener('click', () => {
 
 loadDiary(currentDate);
 
-// 現在時刻（カレンダータブ内のダミー表示）
+// 現在時刻（秒単位の日付・時刻を表示のみ）
+const clockDate = document.getElementById('clock-date');
 const clock = document.getElementById('clock');
 function updateClock() {
-  clock.textContent = new Date().toLocaleTimeString('ja-JP');
+  const now = new Date();
+  clockDate.textContent = now.toLocaleDateString('ja-JP', {
+    year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short',
+  });
+  clock.textContent = now.toLocaleTimeString('ja-JP', { hour12: false });
 }
 updateClock();
 setInterval(updateClock, 1000);
