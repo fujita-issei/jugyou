@@ -53,49 +53,63 @@ const calTitle = document.getElementById('cal-title');
 const calGrid = document.getElementById('cal-grid');
 const today = new Date();
 let calYear = today.getFullYear();
-let calMonth = today.getMonth();
+let calMonth = today.getMonth(); // 0〜11（0 = 1月）
 
+// 2026, 10, 5 → "2026-11-05"
 function fmtDate(y, m, d) {
   return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 
+// 画面に表示するカレンダーをつくる（calYear / calMonth を変えたらこれを呼ぶ）
 function renderCalendar() {
   calTitle.textContent = `${calYear}年${calMonth + 1}月`;
-  calGrid.innerHTML = '';
-  ['日', '月', '火', '水', '木', '金', '土'].forEach((w, i) => {
-    const h = document.createElement('div');
-    h.className = 'cal-week' + (i === 0 ? ' sun' : i === 6 ? ' sat' : '');
-    h.textContent = w;
-    calGrid.appendChild(h);
-  });
-  const first = new Date(calYear, calMonth, 1).getDay();
-  const days = new Date(calYear, calMonth + 1, 0).getDate();
-  for (let i = 0; i < first; i++) calGrid.appendChild(document.createElement('div'));
+
+  const firstWeekday = new Date(calYear, calMonth, 1).getDay();  // 1日は何曜日？（0 = 日）
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate(); // その月は何日まで？
   const todayStr = fmtDate(today.getFullYear(), today.getMonth(), today.getDate());
-  for (let d = 1; d <= days; d++) {
-    const date = fmtDate(calYear, calMonth, d);
-    const cell = document.createElement('button');
-    cell.className = 'cal-day';
-    if (date === todayStr) cell.classList.add('today');
-    if (localStorage.getItem(DIARY_KEY + date)) cell.classList.add('has-diary');
-    cell.textContent = d;
-    cell.addEventListener('click', () => {
-      loadDiary(date);
-      showView('view-journal');
-    });
-    calGrid.appendChild(cell);
+
+  // 曜日の見出し
+  let html = '<div class="cal-week sun">日</div><div class="cal-week">月</div>'
+    + '<div class="cal-week">火</div><div class="cal-week">水</div>'
+    + '<div class="cal-week">木</div><div class="cal-week">金</div>'
+    + '<div class="cal-week sat">土</div>';
+
+  // 1日の前の空白
+  for (let i = 0; i < firstWeekday; i++) {
+    html += '<div></div>';
   }
+
+  // 1日〜月末のボタン
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = fmtDate(calYear, calMonth, d);
+    let cls = 'cal-day';
+    if (date === todayStr) cls += ' today';                          // 今日
+    if (localStorage.getItem(DIARY_KEY + date)) cls += ' has-diary'; // 日記あり
+    html += `<button class="${cls}" data-date="${date}">${d}</button>`;
+  }
+
+  calGrid.innerHTML = html;
 }
 
-function moveMonth(delta) {
-  const d = new Date(calYear, calMonth + delta, 1);
-  calYear = d.getFullYear();
-  calMonth = d.getMonth();
+// 日付ボタンのクリック（カレンダー全体でまとめて受ける）
+calGrid.addEventListener('click', (e) => {
+  const date = e.target.dataset.date; // 日付ボタン以外なら undefined
+  if (!date) return;
+  loadDiary(date);
+  showView('view-journal');
+});
+
+// 前の月 / 次の月 / 今日
+document.getElementById('cal-prev').addEventListener('click', () => {
+  calMonth--;
+  if (calMonth < 0) { calMonth = 11; calYear--; }
   renderCalendar();
-}
-
-document.getElementById('cal-prev').addEventListener('click', () => moveMonth(-1));
-document.getElementById('cal-next').addEventListener('click', () => moveMonth(1));
+});
+document.getElementById('cal-next').addEventListener('click', () => {
+  calMonth++;
+  if (calMonth > 11) { calMonth = 0; calYear++; }
+  renderCalendar();
+});
 document.getElementById('cal-today').addEventListener('click', () => {
   calYear = today.getFullYear();
   calMonth = today.getMonth();
