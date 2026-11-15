@@ -74,8 +74,14 @@ main { padding: 24px; max-width: 1000px; margin: 0 auto; }
 }
 .box-desc { font-size: 14px; line-height: 1.8; color: #666; }
 
-.clock {
+.clock-date {
   margin-top: 20px;
+  font-size: 20px;
+  text-align: center;
+  color: #666;
+}
+.clock {
+  margin-top: 8px;
   font-size: 40px;
   font-variant-numeric: tabular-nums;
   text-align: center;
